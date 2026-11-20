@@ -11,8 +11,7 @@ import bpy
 from mathutils import Vector
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
-ASSET = ROOT / "assets" / "conifers" / "pine"
+ASSET = Path(__file__).resolve().parents[1]
 SIZE = 512
 
 
@@ -461,7 +460,7 @@ def main():
     if args.output_dir is not None:
         asset_dir = args.output_dir.resolve()
     elif seed is not None:
-        asset_dir = ROOT / "variants" / f"pine-{seed}"
+        asset_dir = ASSET / "variants" / f"pine-{seed}"
     else:
         asset_dir = ASSET
     render_dir = asset_dir / "renders"

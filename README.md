@@ -2,7 +2,7 @@
 
 ## Conifers
 
-Keep each tree in its own folder under `assets/conifers/`. Its Blender and GLB files sit alongside `textures/`, `source/`, and `renders/`.
+Keep each tree in its own folder under `assets/conifers/`. Its Blender and GLB files sit alongside `textures/`, `source/`, `renders/`, and `tools/`.
 
 ### Pine
 
@@ -24,7 +24,7 @@ The GLB uses glTF's meter scale and Y-up convention. The asset includes a single
 ## Rebuild
 
 ```sh
-blender --background --python-exit-code 1 --python tools/build_pine.py
+blender --background --python-exit-code 1 --python assets/conifers/pine/tools/build_pine.py
 ```
 
 The generator uses Blender 4.3 and its bundled NumPy. Geometry and needle textures are generated locally from fixed seeds. The bark maps are generated from the [included swatch and its provenance](assets/conifers/pine/source).
@@ -34,7 +34,7 @@ The generator uses Blender 4.3 and its bundled NumPy. Geometry and needle textur
 Pass an integer seed after Blender's `--` separator. The same seed reproduces the same geometry. Different seeds vary the height, crown width and taper, trunk lean, and branch layout. Variants keep the ground-level pivot, meter scale, and two game materials.
 
 ```sh
-blender --background --python-exit-code 1 --python tools/build_pine.py -- --seed 27 --no-renders
+blender --background --python-exit-code 1 --python assets/conifers/pine/tools/build_pine.py -- --seed 27 --no-renders
 ```
 
-This writes `pine.blend`, `pine.glb`, and the texture maps to `variants/pine-27/`. Set `--output-dir PATH` to choose a different folder. Omit `--no-renders` to include studio previews. Use `--random` in place of `--seed 27` to choose and print a new seed. Run without either flag to rebuild the reference pine.
+This writes `pine.blend`, `pine.glb`, and the texture maps to `assets/conifers/pine/variants/pine-27/`. Set `--output-dir PATH` to choose a different folder. Omit `--no-renders` to include studio previews. Use `--random` in place of `--seed 27` to choose and print a new seed. Run without either flag to rebuild the reference pine.
