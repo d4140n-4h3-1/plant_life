@@ -1,4 +1,6 @@
-# Low-poly trees
+# plant_life
+
+A series of plant models.
 
 ## Conifers
 
