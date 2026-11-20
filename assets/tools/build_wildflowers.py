@@ -14,7 +14,7 @@ from build_pine import SIZE, main
 from build_birch_heather import finish, stem_maps
 
 
-def leaves(sorrel):
+def leaves(sorrel, *, lobed=False):
     v,u=np.mgrid[:SIZE,:SIZE]/(SIZE-1)
     t=1-v
     if sorrel:
@@ -28,6 +28,8 @@ def leaves(sorrel):
         x=abs(u-.5+.024*np.sin(1.1*tau*t))
         l=np.clip((t-.025)/.95,0,1)
         blade=.43*np.sin(np.pi*l)**.79*(1.11-.29*l)
+        if lobed:
+            blade*=.70+.30*np.cos(tau*(5.8*l+.13*np.sin(tau*l)))
         teeth=.018*np.cos(36*tau*l)*np.sin(np.pi*l)**.42
         edge=blade+teeth-x
         edge=np.where((t>.025)&(t<.975),edge,-1)
@@ -94,28 +96,33 @@ def ground_stem(tree, path, widths):
         p.z=0
 
 
-def bell(tree, root, heading, length, width):
+def bell(tree, root, heading, length, width, *, bluebell=False):
     direction=heading.normalized()
     side=UP.cross(direction).normalized()
     up=direction.cross(side)
     rings=[]
-    for level,radius,size in ((0,.22,1),(.23,.47,1),(.59,.75,1),
-                               (.94,1,1),(.98,.83,1),(.68,.59,.91),(.27,.28,.85)):
+    profile = ((0,.22,1),(.23,.47,1),(.59,.75,1),
+               (.94,1,1),(.98,.83,1),(.68,.59,.91),(.27,.28,.85))
+    sides = 9
+    if bluebell:
+        sides = 6
+        profile = ((0,.31,1),(.55,.68,1),(.90,1.11,1),(.98,.68,.94),(.29,.31,.91))
+    for level,radius,size in profile:
         center=root+direction*length*level-UP*(.17*length*level**2)
         ring=[]
-        for i in range(9):
-            angle=i*tau/9
+        for i in range(sides):
+            angle=i*tau/sides
             waviness=1+.071*cos(5*angle)*level
             r=width*radius*waviness
             ring.append(tree.vertex(center+r*(cos(angle)*side+sin(angle)*size*up)))
         rings.append(ring)
 
     # The last three rows run back down the throat, creating a real open lip.
-    along=(.02,.22,.52,.94,.945,.61,.23)
+    along=(.02,.52,.95,.92,.23) if bluebell else (.02,.22,.52,.94,.945,.61,.23)
     for i,(a,b) in enumerate(zip(rings,rings[1:])):
         index=len(tree.uvs)
         tree.join(a,b,along[i],along[i+1],2)
-        band=0 if i<4 else .50
+        band=0 if i<(3 if bluebell else 4) else .50
         for row in range(index,len(tree.uvs)):
             tree.uvs[row]=tuple((band+.006+.485*u,v) for u,v in tree.uvs[row])
     tree.cap(rings[0],root-direction*.002,.03,.001,2,reverse=True)

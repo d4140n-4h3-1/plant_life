@@ -158,6 +158,8 @@ A meadow grass with dense cylindrical seed heads. See the [meadow foxtail asset 
 
 [Foxglove](assets/wildflowers/foxglove/README.md) adds tall pink bell spikes. [Wood sorrel](assets/wildflowers/wood-sorrel/README.md) adds low heart-shaped foliage and white flowers. [Oxeye daisy](assets/wildflowers/oxeye-daisy/README.md) adds white petals around raised yellow centers.
 
+[English bluebell](assets/wildflowers/english-bluebell/README.md) adds drooping violet-blue flower spikes. [Common poppy](assets/wildflowers/common-poppy/README.md) adds scarlet blooms with dark centers.
+
 ## Environments
 
 ### Woodland clearing
