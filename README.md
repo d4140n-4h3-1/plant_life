@@ -102,6 +102,10 @@ glslc --target-env=vulkan1.0 pine_wind.vert -o pine_wind.vert.spv
 
 A pale-trunked tree with an airy broadleaf crown. See the [silver birch asset and generator](assets/deciduous/silver-birch/README.md).
 
+### Rowan
+
+A deciduous tree with pinnate foliage and red-orange berries. See the [rowan asset and generator](assets/deciduous/rowan/README.md).
+
 ## Shrubs
 
 ### Bilberry
@@ -130,13 +134,17 @@ A taller clump grass with airy bronze panicles. See the [tufted hairgrass asset 
 
 A woodland grass with broad blades and nodding spikelets. See the [wood melick asset and generator](assets/grasses/wood-melick/README.md).
 
+### Meadow foxtail
+
+A meadow grass with dense cylindrical seed heads. See the [meadow foxtail asset and generator](assets/grasses/meadow-foxtail/README.md).
+
 ## Ferns
 
 [Hard fern](assets/ferns/hard-fern/README.md) forms a narrow-frond rosette for shade. [Bracken](assets/ferns/bracken/README.md) has larger, divided fronds for woodland edges and clearings.
 
 ## Wildflowers
 
-[Foxglove](assets/wildflowers/foxglove/README.md) adds tall pink bell spikes. [Wood sorrel](assets/wildflowers/wood-sorrel/README.md) adds low heart-shaped foliage and white flowers.
+[Foxglove](assets/wildflowers/foxglove/README.md) adds tall pink bell spikes. [Wood sorrel](assets/wildflowers/wood-sorrel/README.md) adds low heart-shaped foliage and white flowers. [Oxeye daisy](assets/wildflowers/oxeye-daisy/README.md) adds white petals around raised yellow centers.
 
 ## Environments
 

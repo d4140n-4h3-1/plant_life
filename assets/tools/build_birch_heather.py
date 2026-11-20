@@ -22,7 +22,8 @@ def atlas(kind):
     """Paint a single branched spray with a cutout silhouette."""
     rng = Random(162 if kind=="leaves" else 341)
     rgba=np.zeros((SIZE,SIZE,4))
-    birch=kind=="leaves"
+    rowan=kind=="rowan"
+    birch=kind in ("leaves","rowan")
     broom=kind in ("broom-leaves","broom-flowers")
     rgba[..., :3]=(.19,.32,.11) if kind!="blossoms" else (.43,.23,.33)
     if kind=="broom-flowers":
@@ -76,15 +77,15 @@ def atlas(kind):
         lateral=np.array((-direction[1],direction[0]))
         central=np.linalg.norm(end-start)>300
         mark(start,end,2.9,stem)
-        count=(19 if central else 4) if broom else (13 if central else 6) if birch else (27 if central else 14)
+        count=(19 if central else 4) if broom else (17 if central else 9) if rowan else (13 if central else 6) if birch else (27 if central else 14)
         for i in range(count):
             p=start+(end-start)*(i+.44)/count
             sign=-1 if i%2 else 1
             if birch:
-                blade=rng.uniform(25,55)*(1-.16*i/count)
+                blade=(rng.uniform(23,43) if rowan else rng.uniform(25,55))*(1-.16*i/count)
                 heading=direction*rng.uniform(.25,.75)+sign*lateral*rng.uniform(.65,1.07)
                 color=np.array((.246,.433,.126))*rng.uniform(.78,1.25)
-                mark(p,p+heading*blade,blade*.43,color,leaf=True)
+                mark(p,p+heading*blade,blade*(.28 if rowan else .43),color,leaf=True)
             elif broom:
                 p=p+sign*lateral*3
                 if kind=="broom-leaves" or i%4==0:

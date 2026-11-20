@@ -176,16 +176,18 @@ def foxglove_mesh(maps,seed=None):
                   seed,((.79,1.20),(.80,1.19),(.78,1.24)), smooth_kinds=(0,2))
 
 
-def petalled_flower(tree, origin, direction, radius, spin):
+def petalled_flower(tree, origin, direction, radius, spin, petals=5):
     axis=direction.normalized()
     right=UP.cross(axis).normalized()
     forward=axis.cross(right)
     cup=tree.vertex(origin+axis*radius*.04)
-    for j in range(5):
-        angle=spin+j*tau/5
+    for j in range(petals):
+        angle=spin+j*tau/petals
         stem=right*cos(angle)+forward*sin(angle)
         tangent=axis.cross(stem)
         outline=((.23,-.19),(.61,-.28),(.87,-.23),(1,0),(.87,.23),(.61,.28),(.23,.19))
+        if petals>5:
+            outline=tuple((along,.39*across) for along,across in outline)
         rim=[]
         for along, across in outline:
             bowl=.32*along+.26*across**2
