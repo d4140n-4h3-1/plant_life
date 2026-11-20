@@ -122,6 +122,10 @@ A fine-bladed tuft with dry seed heads. See the [models, texture maps, generator
 
 A taller clump grass with airy bronze panicles. See the [tufted hairgrass asset and generator](assets/grasses/tufted-hairgrass/README.md).
 
+## Ferns
+
+[Hard fern](assets/ferns/hard-fern/README.md) forms a narrow-frond rosette for shade. [Bracken](assets/ferns/bracken/README.md) has larger, divided fronds for woodland edges and clearings.
+
 ## Environments
 
 ### Woodland clearing
