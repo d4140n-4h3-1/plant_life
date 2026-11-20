@@ -28,11 +28,11 @@ def write_png(path, pixels):
                      + chunk(b"IDAT", zlib.compress(data, 7)) + chunk(b"IEND", b""))
 
 
-def needle_spray():
+def needle_spray(spruce=False):
     """Rasterize one shoot with side stems and individual needle silhouettes."""
-    random = Random(94)
+    random = Random(167 if spruce else 94)
     rgba = np.zeros((SIZE, SIZE, 4))
-    rgba[..., :3] = (.19, .30, .135)
+    rgba[..., :3] = (.14, .24, .135) if spruce else (.19, .30, .135)
     height = np.full((SIZE, SIZE), .5)
 
     def stroke(start, end, width, color, ridge):
@@ -54,14 +54,14 @@ def needle_spray():
         height[y0:y1, x0:x1][inside] = .5 + ridge*alpha[inside]
 
     stem = (.32, .24, .11)
-    shoots = [((254, 496), (259, 25), 42, 14)]
+    shoots = [((254, 496), (259, 25), 70 if spruce else 42, 10 if spruce else 14)]
     for i in range(11):
         y = 454 - i*34
         for side in (-1, 1):
             spread = (126 - 6.5*i) * random.uniform(.81, 1.17)
             shoots.append(((255, y + random.uniform(-11, 11)),
                            (255 + side*spread, y - random.uniform(42, 102)),
-                           11, 10))
+                           17 if spruce else 11, 7 if spruce else 10))
     for index, (start, end, count, reach) in enumerate(reversed(shoots)):
         dx, dy = end[0]-start[0], end[1]-start[1]
         length = np.hypot(dx, dy)
@@ -72,17 +72,19 @@ def needle_spray():
             for side in (-1, 1):
                 t = (i + random.uniform(.45, 1.1))/(count+1)
                 root = np.asarray(start) + t*np.array([dx,dy])
-                size = (19 + reach*random.random())*(1-.34*t)*random.uniform(.7, 1.4)
+                size = ((14 if spruce else 19) + reach*random.random())*(1-.34*t)*random.uniform(.7, 1.4)
                 tip = root + along*size + across*side*size*random.uniform(.55, 1.46)
                 value = random.uniform(.7, 1.26)
                 base = np.array((.26, .40, .165) if index % 3 else (.30, .43, .17))
+                if spruce:
+                    base = np.array((.175, .30, .141) if index % 3 else (.23, .36, .161))
                 stroke(root, tip, random.uniform(1.45, 2.65), base*value, .23)
     return rgba, height
 
 
-def pine_bark():
-    """Derive tileable PBR inputs from the generated pine bark swatch."""
-    image = bpy.data.images.load(str(ASSET / "source" / "bark_swatch.png"))
+def bark_swatch_maps(path):
+    """Derive tileable PBR inputs from a bark swatch."""
+    image = bpy.data.images.load(str(path))
     image.colorspace_settings.name = "Non-Color"
     assert tuple(image.size) == (SIZE, SIZE)
     pixels = np.empty(SIZE*SIZE*4, dtype=np.float32)
@@ -116,9 +118,11 @@ def pine_bark():
     return color, height, roughness, occlusion
 
 
-def material(kind, maps):
-    if kind == "bark":
-        color, height, roughness, occlusion = pine_bark()
+def material(kind, maps, *, label="Pine", texture_data=None):
+    if texture_data is not None:
+        color, height, roughness, occlusion, relief = texture_data
+    elif kind == "bark":
+        color, height, roughness, occlusion = bark_swatch_maps(ASSET / "source" / "bark_swatch.png")
         relief = 2.7
     else:
         color, height = needle_spray()
@@ -139,7 +143,7 @@ def material(kind, maps):
         write_png(path, pixels)
         paths[name] = path
 
-    mat = bpy.data.materials.new("Pine " + kind.title())
+    mat = bpy.data.materials.new(label + " " + kind.title())
     mat.use_nodes = True
     nodes, links = mat.node_tree.nodes, mat.node_tree.links
     shader = nodes.get("Principled BSDF")
@@ -400,10 +404,10 @@ def point_at(obj, target):
     obj.rotation_euler = (Vector(target) - obj.location).to_track_quat("-Z", "Y").to_euler()
 
 
-def studio_camera(framing=1):
+def studio_camera(framing=1, ground_size=200):
     ground_mat = bpy.data.materials.new("Studio sage")
     ground_mat.diffuse_color = (.21, .27, .245, 1)
-    bpy.ops.mesh.primitive_plane_add(size=200, location=(0, 0, -.014))
+    bpy.ops.mesh.primitive_plane_add(size=ground_size, location=(0, 0, -.014))
     bpy.context.object.data.materials.append(ground_mat)
 
     for name, location, power, size, color in [
@@ -436,13 +440,16 @@ def studio_camera(framing=1):
     return scene, camera
 
 
-def studio(render_dir, framing=1):
+PINE_SHOTS = [
+    ("pine-full", (11,-17,9.0), (0,0,3.49), 8.85, (760,950)),
+    ("pine-detail", (-8,-10,5.3), (0,0,2.03), 4.54, (900,720)),
+    ("pine-bark", (1.8,-5.8,1.65), (0,0,.88), 2.10, (760,900)),
+]
+
+def studio(render_dir, framing=1, shots=PINE_SHOTS, samples=32):
     scene, camera = studio_camera(framing)
-    for name, location, target, scale, resolution in [
-        ("pine-full", (11,-17,9.0), (0,0,3.49), 8.85, (760,950)),
-        ("pine-detail", (-8,-10,5.3), (0,0,2.03), 4.54, (900,720)),
-        ("pine-bark", (1.8,-5.8,1.65), (0,0,.88), 2.10, (760,900)),
-    ]:
+    scene.cycles.samples = samples
+    for name, location, target, scale, resolution in shots:
         camera.location = Vector(location)*framing
         point_at(camera, Vector(target)*framing)
         camera.data.ortho_scale = scale*framing
@@ -451,23 +458,24 @@ def studio(render_dir, framing=1):
         bpy.ops.render.render(write_still=True)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(asset=ASSET, mesh_builder=pine_mesh, label="Pine", shots=PINE_SHOTS,
+         reference_size=(5, 5, 7.2), studio_scale=1, samples=32):
+    parser = argparse.ArgumentParser(description=f"Build a {label} asset with Blender.")
     variation = parser.add_mutually_exclusive_group()
-    variation.add_argument("--seed", type=int, help="Generate a reproducible pine variant.")
+    variation.add_argument("--seed", type=int, help="Generate a reproducible variant.")
     variation.add_argument("--random", action="store_true", help="Choose a new variant seed.")
     parser.add_argument("--output-dir", type=Path, help="Directory for the model and maps.")
     parser.add_argument("--no-renders", action="store_true", help="Skip studio previews.")
     args = parser.parse_args(sys.argv[sys.argv.index("--")+1:] if "--" in sys.argv else [])
     seed = SystemRandom().getrandbits(64) if args.random else args.seed
     if seed is not None:
-        print(f"Pine seed: {seed}", flush=True)
+        print(f"{label} seed: {seed}", flush=True)
     if args.output_dir is not None:
         asset_dir = args.output_dir.resolve()
     elif seed is not None:
-        asset_dir = ASSET / "variants" / f"pine-{seed}"
+        asset_dir = asset / "variants" / f"{asset.name}-{seed}"
     else:
-        asset_dir = ASSET
+        asset_dir = asset
     render_dir = asset_dir / "renders"
     maps = asset_dir / "textures"
     maps.mkdir(parents=True, exist_ok=True)
@@ -475,10 +483,12 @@ def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     scene.unit_settings.system = "METRIC"
-    obj = pine_mesh(maps, seed)
+    obj = mesh_builder(maps, seed)
     bpy.context.view_layer.update()
     width, depth, height = obj.dimensions
-    framing = max(height/7.2, width/5, depth/5) if seed is not None else 1
+    framing = studio_scale
+    if seed is not None:
+        framing *= max(value/reference for value, reference in zip(obj.dimensions, reference_size))
     for screen in bpy.data.screens:
         for area in screen.areas:
             if area.type == "VIEW_3D":
@@ -488,15 +498,15 @@ def main():
                 view.region_3d.view_rotation = Vector((7,-11,4)).to_track_quat("Z", "Y")
                 view.shading.type = "MATERIAL"
     bpy.context.preferences.filepaths.save_version = 0
-    bpy.ops.wm.save_as_mainfile(filepath=str(asset_dir / "pine.blend"), relative_remap=False)
-    bpy.ops.export_scene.gltf(filepath=str(asset_dir / "pine.glb"), use_selection=True,
+    bpy.ops.wm.save_as_mainfile(filepath=str(asset_dir / f"{asset.name}.blend"), relative_remap=False)
+    bpy.ops.export_scene.gltf(filepath=str(asset_dir / f"{asset.name}.glb"), use_selection=True,
                               export_format="GLB", export_tangents=True,
                               export_extras=seed is not None)
-    print(f"Pine triangles: {len(obj.data.polygons)}", flush=True)
-    print(f"Pine dimensions: {width:.2f} × {depth:.2f} × {height:.2f} m", flush=True)
+    print(f"{label} triangles: {len(obj.data.polygons)}", flush=True)
+    print(f"{label} dimensions: {width:.2f} × {depth:.2f} × {height:.2f} m", flush=True)
     if not args.no_renders:
         render_dir.mkdir(parents=True, exist_ok=True)
-        studio(render_dir, framing)
+        studio(render_dir, framing, shots, samples)
 
 
 if __name__ == "__main__":

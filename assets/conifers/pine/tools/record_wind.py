@@ -1,4 +1,4 @@
-"""Render a seamless wind loop from the open Blender pine model."""
+"""Render a seamless wind loop from an open conifer model."""
 import argparse
 from pathlib import Path
 import subprocess
@@ -31,14 +31,14 @@ def wind_offset(rest, height, cycle, direction, strength):
     )
 
 
-def main():
+def main(tree_name="Pine", default_output=TOOLS.parent/"renders"/"pine-wind.gif"):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=TOOLS.parent/"renders/pine-wind.gif")
+    parser.add_argument("--output", type=Path, default=default_output)
     args = parser.parse_args(sys.argv[sys.argv.index("--")+1:] if "--" in sys.argv else [])
 
-    tree = bpy.context.scene.objects.get("Pine")
+    tree = bpy.context.scene.objects.get(tree_name)
     if tree is None or tree.type != "MESH":
-        parser.error("Open pine.blend before running this script.")
+        parser.error(f"Open a Blender file with a {tree_name} mesh before running this script.")
     rest = np.empty((len(tree.data.vertices), 3), dtype=np.float32)
     tree.data.vertices.foreach_get("co", rest.reshape(-1))
     height = float(rest[:, 2].max())
