@@ -53,3 +53,31 @@ blender --background assets/conifers/pine/pine.blend --python-exit-code 1 \
 ```
 
 The recorder writes a 2.4-second GIF and accepts `-- --output PATH` to save it elsewhere.
+
+#### Vulkan
+
+Use [`pine_wind.vert.spv`](assets/conifers/pine/tools/pine_wind.vert.spv) as a Vulkan 1.0 vertex stage with entry point `main`. The shader keeps the GLB's UVs and deforms the world-space normal and tangent for normal mapping. Pair it with your bark and alpha-masked foliage fragment shaders. Use the same vertex deformation and foliage cutoff in shadow and depth passes.
+
+| Vertex location | glTF attribute | Vulkan format |
+| --- | --- | --- |
+| 0 | `POSITION` | `VK_FORMAT_R32G32B32_SFLOAT` |
+| 1 | `NORMAL` | `VK_FORMAT_R32G32B32_SFLOAT` |
+| 2 | `TEXCOORD_0` | `VK_FORMAT_R32G32_SFLOAT` |
+| 3 | `TANGENT` | `VK_FORMAT_R32G32B32A32_SFLOAT` |
+
+Bind a 64-byte column-major view-projection matrix as a vertex-stage uniform buffer at set 0, binding 0. It should use your engine's Vulkan clip-space convention.
+
+| Vertex-stage push constant | Byte offset | Contents |
+| --- | ---: | --- |
+| `model` | 0 | Column-major local-to-world matrix |
+| `wind` | 64 | Local XZ direction, strength, time in seconds |
+| `tree` | 80 | Local height, instance phase in radians, two reserved floats |
+
+The push-constant range is 96 bytes. Vertex outputs at locations 0 through 3 are UV (`vec2`), world normal (`vec3`), world tangent with handedness (`vec4`), and world position (`vec3`). Use a model transform with nonzero scale.
+
+To rebuild the SPIR-V with the Vulkan SDK's `glslc`, run:
+
+```sh
+cd assets/conifers/pine/tools
+glslc --target-env=vulkan1.0 pine_wind.vert -o pine_wind.vert.spv
+```
