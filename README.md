@@ -91,3 +91,9 @@ glslc --target-env=vulkan1.0 pine_wind.vert -o pine_wind.vert.spv
 ### Bilberry
 
 A compact forest-understory shrub with small, serrated leaves and blue fruit. See the [bilberry model, texture maps, renders, and generator](assets/shrubs/bilberry/README.md).
+
+## Grasses
+
+### Sheep fescue
+
+A fine-bladed tuft with dry seed heads. See the [models, texture maps, generator, and scatter example](assets/grasses/sheep-fescue/README.md).
