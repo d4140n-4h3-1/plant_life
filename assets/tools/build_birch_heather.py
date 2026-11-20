@@ -24,7 +24,9 @@ def atlas(kind):
     rgba=np.zeros((SIZE,SIZE,4))
     rowan=kind=="rowan"
     rose=kind=="rose"
-    birch=kind in ("leaves","rowan","rose")
+    oak=kind=="oak"
+    hawthorn=kind=="hawthorn"
+    birch=kind in ("leaves","rowan","rose","oak","hawthorn")
     broom=kind in ("broom-leaves","broom-flowers")
     rgba[..., :3]=(.19,.32,.11) if kind!="blossoms" else (.43,.23,.33)
     if kind=="broom-flowers":
@@ -49,7 +51,11 @@ def atlas(kind):
         lateral=abs((x-start[0])*d[1]-(y-start[1])*d[0])/length
         if leaf:
             rim=width*np.sin(np.pi*q)**.83*(1.23-.47*q)
-            rim+=min(1.9,width*.21)*np.cos(19*tau*q)*np.sin(np.pi*q)**.4
+            if oak or hawthorn:
+                pairs=4.4 if oak else 3
+                rim*=.75+.25*np.cos(tau*q*pairs)
+            else:
+                rim+=min(1.9,width*.21)*np.cos(19*tau*q)*np.sin(np.pi*q)**.4
             alpha=np.clip(rim-lateral+.55,0,1)*((t>0)&(t<1))
             midrib=np.exp(-lateral/max(1,width*.077))
             veins=np.exp(-abs(np.sin(tau*(q*5+lateral/max(1,width)*.78)))*9)*(1-midrib)
@@ -85,7 +91,8 @@ def atlas(kind):
             if birch:
                 blade=(rng.uniform(23,43) if rowan else rng.uniform(25,55))*(1-.16*i/count)
                 heading=direction*rng.uniform(.25,.75)+sign*lateral*rng.uniform(.65,1.07)
-                color=np.array((.25,.375,.121) if rose else (.246,.433,.126))*rng.uniform(.78,1.25)
+                palette=(.198,.349,.09) if oak else (.285,.416,.105) if hawthorn else (.25,.375,.121) if rose else (.246,.433,.126)
+                color=np.array(palette)*rng.uniform(.78,1.25)
                 mark(p,p+heading*blade,blade*(.36 if rose else .28 if rowan else .43),color,leaf=True)
             elif broom:
                 p=p+sign*lateral*3

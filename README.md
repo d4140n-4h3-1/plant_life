@@ -106,6 +106,10 @@ A pale-trunked tree with an airy broadleaf crown. See the [silver birch asset an
 
 A deciduous tree with pinnate foliage and red-orange berries. See the [rowan asset and generator](assets/deciduous/rowan/README.md).
 
+### English oak
+
+A broad deciduous crown on a thick trunk with spreading limbs. See the [English oak asset and generator](assets/deciduous/english-oak/README.md).
+
 ## Shrubs
 
 ### Bilberry
@@ -119,6 +123,10 @@ A low, flowering shrub with pink late-summer sprays. See the [common heather ass
 ### Common broom
 
 An upright shrub with yellow spring flowers. See the [common broom asset and generator](assets/shrubs/common-broom/README.md).
+
+### Common hawthorn
+
+A dense hedgerow shrub with red haws. See the [common hawthorn asset and generator](assets/shrubs/common-hawthorn/README.md).
 
 ### Wild roses
 
