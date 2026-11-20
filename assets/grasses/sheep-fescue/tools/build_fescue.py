@@ -19,7 +19,7 @@ SHOTS = [
 ]
 
 
-def grass_maps():
+def grass_maps(tall=False):
     """Make a striped atlas for fresh blades, weathered blades, and seed heads."""
     v,u = np.mgrid[:SIZE, :SIZE]/SIZE
     band = np.floor(u*3).astype(int)
@@ -28,6 +28,8 @@ def grass_maps():
     fiber = .5+.5*np.cos(tau*(31*x+1.8*v))
     wax = np.random.default_rng(48).random(v.shape)
     greens = np.array([(.17,.31,.20),(.25,.37,.218),(.49,.43,.25)])
+    if tall:
+        greens=np.array([(.195,.347,.135),(.275,.412,.164),(.58,.444,.237)])
     colors = greens[band].copy()
     base = np.clip((v-.70)*2.1,0,.6)
     tips = np.clip((.23-v)*3.4,0,1)
@@ -41,8 +43,9 @@ def grass_maps():
     return colors,height,roughness,.87+.11*vein,1.1
 
 
-def fescue_mesh(maps, seed=None, grass_material=None):
-    rng = Random(209 if seed is None else seed)
+def fescue_mesh(maps, seed=None, grass_material=None, *, tall=False):
+    name = "Tufted Hairgrass" if tall else "Sheep Fescue"
+    rng = Random((610 if tall else 209) if seed is None else seed)
     vertices, triangles, uvs = [], [], []
 
     def vertex(p):
@@ -79,6 +82,9 @@ def fescue_mesh(maps, seed=None, grass_material=None):
         base = ray*(.007+.054*spread)+cross*rng.uniform(-.013,.013)
         reach = rng.uniform(.065,.204)*(.70+.47*spread)
         rise = rng.uniform(.10,.30)*(1-.29*spread)
+        if tall:
+            reach *= 1.27
+            rise *= 1.59
         peak = rng.uniform(1.30,2.69)
         turn = rng.uniform(-.29,.29)
         width = rng.uniform(.0020,.0055)
@@ -90,15 +96,30 @@ def fescue_mesh(maps, seed=None, grass_material=None):
         ribbon(curve,(width*.39,width,width*.86,width*.45),
                1 if rng.random()<.33 else 0,rng.uniform(-1.22,1.22))
 
-    for i in range(6):
+    for i in range(10 if tall else 6):
         angle = i*2.39996+.65
         ray = Vector((cos(angle),sin(angle),0))
         cross = UP.cross(ray)
-        height = rng.uniform(.255,.352)
+        height = rng.uniform(.68,.98) if tall else rng.uniform(.255,.352)
         base = ray*rng.uniform(.015,.039)
-        lean = rng.uniform(.058,.104)
+        lean = rng.uniform(.07,.155) if tall else rng.uniform(.058,.104)
         path = [base+ray*lean*t*t+UP*(height*t) for t in (0,.44,.73,.92,1)]
         ribbon(path,(.0019,.0016,.0014,.00094),2,rng.uniform(-.42,.42))
+        if tall:
+            for j in range(8):
+                fraction = .68 + .034*j
+                joint = base+ray*lean*fraction*fraction+UP*height*fraction
+                azimuth = j*2.19+angle
+                side = Vector((cos(azimuth),sin(azimuth),0))
+                length = rng.uniform(.046,.105)*(1-.068*j)
+                tip = joint + side*length + UP*length*.69
+                ribbon((joint,joint.lerp(tip,.52),tip),(.0013,.00087),2)
+                for k in range(3):
+                    p=joint.lerp(tip,.49+.22*k)
+                    sprig=(side*.68+UP+cross*rng.uniform(-.34,.34)).normalized()
+                    size=rng.uniform(.008,.016)
+                    ribbon((p,p+sprig*size*.55,p+sprig*size),(.0012,.0024),2)
+            continue
         for j in range(7):
             fraction = .77+.032*j
             joint = base+ray*lean*fraction*fraction+UP*(height*fraction)
@@ -109,31 +130,31 @@ def fescue_mesh(maps, seed=None, grass_material=None):
             ribbon((joint,mid,tip),(.0016,.0032),2,rng.uniform(-.65,.65))
 
     if seed is not None:
-        shape = Random(f"fescue-shape:{seed}")
+        shape = Random(f"{'hairgrass' if tall else 'fescue'}-shape:{seed}")
         sx,sy,sz = shape.uniform(.79,1.22),shape.uniform(.78,1.19),shape.uniform(.79,1.20)
         lean_x,lean_y = shape.uniform(-.029,.029),shape.uniform(-.029,.029)
         for i,(x,y,z) in enumerate(vertices):
-            bend = (z/.35)**2
+            bend = (z/(.96 if tall else .35))**2
             vertices[i] = (x*sx+lean_x*bend,y*sy+lean_y*bend,z*sz)
 
-    mesh = bpy.data.meshes.new("Sheep Fescue")
+    mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(vertices,[],triangles)
     assert not mesh.validate()
     mesh.update()
     if grass_material is None:
-        grass_material = material("grass",maps,label="Sheep Fescue",texture_data=grass_maps())
+        grass_material = material("grass",maps,label=name,texture_data=grass_maps(tall))
         grass_material.use_backface_culling = False
     mesh.materials.append(grass_material)
     layer = mesh.uv_layers.new(name="UVMap")
     for polygon, coords in zip(mesh.polygons,uvs):
         for index,uv in zip(polygon.loop_indices,coords):
             layer.data[index].uv = uv
-    obj = bpy.data.objects.new("Sheep Fescue",mesh)
+    obj = bpy.data.objects.new(name,mesh)
     bpy.context.collection.objects.link(obj)
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     if seed is not None:
-        obj["fescue_seed"] = str(seed)
+        obj["hairgrass_seed" if tall else "fescue_seed"] = str(seed)
     return obj
 
 

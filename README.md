@@ -96,17 +96,31 @@ cd assets/conifers/pine/tools
 glslc --target-env=vulkan1.0 pine_wind.vert -o pine_wind.vert.spv
 ```
 
+## Deciduous trees
+
+### Silver birch
+
+A pale-trunked tree with an airy broadleaf crown. See the [silver birch asset and generator](assets/deciduous/silver-birch/README.md).
+
 ## Shrubs
 
 ### Bilberry
 
 A compact forest-understory shrub with small, serrated leaves and blue fruit. See the [bilberry model, texture maps, renders, and generator](assets/shrubs/bilberry/README.md).
 
+### Common heather
+
+A low, flowering shrub with pink late-summer sprays. See the [common heather asset and generator](assets/shrubs/common-heather/README.md).
+
 ## Grasses
 
 ### Sheep fescue
 
 A fine-bladed tuft with dry seed heads. See the [models, texture maps, generator, and scatter example](assets/grasses/sheep-fescue/README.md).
+
+### Tufted hairgrass
+
+A taller clump grass with airy bronze panicles. See the [tufted hairgrass asset and generator](assets/grasses/tufted-hairgrass/README.md).
 
 ## Environments
 
