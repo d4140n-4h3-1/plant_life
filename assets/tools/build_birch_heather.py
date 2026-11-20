@@ -23,7 +23,8 @@ def atlas(kind):
     rng = Random(162 if kind=="leaves" else 341)
     rgba=np.zeros((SIZE,SIZE,4))
     rowan=kind=="rowan"
-    birch=kind in ("leaves","rowan")
+    rose=kind=="rose"
+    birch=kind in ("leaves","rowan","rose")
     broom=kind in ("broom-leaves","broom-flowers")
     rgba[..., :3]=(.19,.32,.11) if kind!="blossoms" else (.43,.23,.33)
     if kind=="broom-flowers":
@@ -84,8 +85,8 @@ def atlas(kind):
             if birch:
                 blade=(rng.uniform(23,43) if rowan else rng.uniform(25,55))*(1-.16*i/count)
                 heading=direction*rng.uniform(.25,.75)+sign*lateral*rng.uniform(.65,1.07)
-                color=np.array((.246,.433,.126))*rng.uniform(.78,1.25)
-                mark(p,p+heading*blade,blade*(.28 if rowan else .43),color,leaf=True)
+                color=np.array((.25,.375,.121) if rose else (.246,.433,.126))*rng.uniform(.78,1.25)
+                mark(p,p+heading*blade,blade*(.36 if rose else .28 if rowan else .43),color,leaf=True)
             elif broom:
                 p=p+sign*lateral*3
                 if kind=="broom-leaves" or i%4==0:

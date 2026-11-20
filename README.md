@@ -120,6 +120,10 @@ A low, flowering shrub with pink late-summer sprays. See the [common heather ass
 
 An upright shrub with yellow spring flowers. See the [common broom asset and generator](assets/shrubs/common-broom/README.md).
 
+### Wild roses
+
+[Dog rose](assets/shrubs/dog-rose/README.md) has arching canes and pink flowers. [Burnet rose](assets/shrubs/burnet-rose/README.md) forms a low, spreading bush with creamy white flowers.
+
 ## Grasses
 
 ### Sheep fescue
