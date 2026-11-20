@@ -166,6 +166,10 @@ A meadow grass with dense cylindrical seed heads. See the [meadow foxtail asset 
 
 A winding trail bordered by pine, Norway spruce, bilberry, and sheep fescue. See the [Blender scene, GLB, rendered views, and rebuild instructions](environments/woodland-clearing/README.md).
 
+### Granite woodland
+
+A loam trail winding through rock outcrops and a mixed canopy, with ferns and wildflowers along the banks. See the [Blender scene, GLB, and rendered views](environments/granite-woodland/README.md).
+
 ## Ground and rocks
 
 [Forest loam](assets/terrain/forest-loam/README.md) is a one-meter tiling soil material. [Granite rocks](assets/rocks/granite-rocks/README.md) supplies a cobble, slab, and boulder with seeded geometry and size variation.
