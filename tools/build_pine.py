@@ -82,29 +82,64 @@ def needle_spray():
     return rgba, height
 
 
+def pine_bark():
+    """Make tileable bark plates with broken edges, flakes and fine grain."""
+    v, u = np.mgrid[:SIZE, :SIZE] / SIZE
+    x, y = tau*u, tau*v
+    columns, rows = 22, 24
+    plate_x = columns*u + .28*np.sin(5*y+2*x) + .12*np.sin(19*y-11*x)
+    plate_y = rows*v + .46*np.sin(7*x-3*y) + .19*np.sin(17*x+9*y)
+    column, row = np.floor(plate_x).astype(int), np.floor(plate_y).astype(int)
+    variation = np.random.default_rng(71).random((rows, columns, 3))
+    nearest = np.full_like(u, np.inf)
+    second = nearest.copy()
+    pigment = np.zeros_like(u)
+    for offset_y in (-1, 0, 1):
+        for offset_x in (-1, 0, 1):
+            px, py = column + offset_x, row + offset_y
+            jitter_x, jitter_y, plate_tone = variation[py % rows, px % columns].transpose(2, 0, 1)
+            distance = ((px + .18 + .64*jitter_x - plate_x)**2
+                        + (py + .18 + .64*jitter_y - plate_y)**2)
+            closer = distance < nearest
+            second = np.where(closer, nearest, np.minimum(second, distance))
+            nearest = np.minimum(nearest, distance)
+            pigment = np.where(closer, plate_tone, pigment)
+
+    gap = np.sqrt(second) - np.sqrt(nearest)
+    fissure = np.exp(-gap/.082)
+    bulge = np.clip(gap*1.30, 0, 1)
+    flakes = (0.5 + 0.5*np.sin(48*y + 24*x + 2.2*np.sin(13*x-5*y)))**6
+    fibers = np.sin(97*x + 2*y + 1.7*np.sin(14*y-3*x))
+    weathering = .52 + .23*np.sin(5*x+7*y) + .18*np.sin(11*x-13*y)
+    grit = np.random.default_rng(37).normal(0, 1, u.shape)
+    height = np.clip(.52 + .16*bulge - .35*fissure + .055*flakes
+                     + .032*fibers + .025*grit + .11*pigment, 0, 1)
+
+    rust = np.array((.37, .216, .137))
+    ash = np.array((.56, .51, .43))
+    mix = np.clip(.56*weathering + .46*pigment + .11*flakes, 0, 1)[..., None]
+    color = rust + (ash-rust)*mix
+    color *= (.84 + .18*bulge - .67*fissure + .062*fibers + .040*grit)[..., None]
+    roughness = np.clip(.93 + .05*fissure - .105*flakes - .06*bulge, 0, 1)
+    occlusion = 1 - .42*fissure
+    return color, height, roughness, occlusion
+
+
 def material(kind):
-    y, x = np.mgrid[:SIZE, :SIZE] / SIZE * tau
-    noise = np.random.default_rng(71).normal(0, 1, (SIZE, SIZE))
     if kind == "bark":
-        warp = x + .026*np.sin(3*y + 2*x) + .012*np.sin(11*y - 3*x)
-        plates = (0.5 + 0.5*np.cos(21*warp + .9*np.sin(7*x)))**.52
-        splits = (0.5 + 0.5*np.cos(47*warp + np.sin(8*y)))**10
-        height = .47 + .28*plates - .18*splits + .06*np.cos(3*y+11*x) + .013*noise
-        dark, light = (.20, .105, .062), (.56, .36, .22)
-        rough, relief = .95, 1.65
-        blend = np.clip((height - .18) / .66, 0, 1)[..., None]
-        color = np.array(dark) + blend * (np.array(light) - dark)
+        color, height, roughness, occlusion = pine_bark()
+        relief = 3.4
     else:
         color, height = needle_spray()
-        rough, relief = .74, .40
+        roughness = np.clip(.74 - .13*(height-.5), 0, 1)
+        occlusion = np.clip(.88 + .12*height, 0, 1)
+        relief = .40
 
     dy = (np.roll(height, -1, 0) - np.roll(height, 1, 0)) / 2
     dx = (np.roll(height, -1, 1) - np.roll(height, 1, 1)) / 2
     normal = np.stack((-dx * relief, dy * relief, np.ones_like(dx)), axis=-1)
     normal /= np.linalg.norm(normal, axis=-1, keepdims=True)
-    roughness = np.clip(rough - .13*(height-.5), 0, 1)
-    orm = np.stack((np.clip(.88 + .12*height, 0, 1), roughness,
-                    np.zeros_like(height)), axis=-1)
+    orm = np.stack((occlusion, roughness, np.zeros_like(height)), axis=-1)
     grayscale = np.repeat(height[..., None], 3, axis=-1)
     paths = {}
     for name, pixels in [("basecolor", color), ("normal", normal*.5 + .5),
@@ -200,8 +235,10 @@ def pine_mesh():
 
     up = Vector((0, 0, 1))
 
-    def branch(start, end, radius):
-        axis = (end-start).normalized()
+    def branch(start, end, radius, v_start):
+        segment = end-start
+        axis = segment.normalized()
+        v_end = v_start + .52*segment.length
         side = up.cross(axis).normalized()
         vertical = axis.cross(side)
         rings = [
@@ -213,8 +250,8 @@ def pine_mesh():
         for i in range(5):
             j = (i+1)%5
             u0, u1 = i/5, (i+1)/5
-            triangle((root[i], root[j], tip[j]), ((u0,0),(u1,0),(u1,.7)), 0)
-            triangle((root[i], tip[j], tip[i]), ((u0,0),(u1,.7),(u0,.7)), 0)
+            triangle((root[i], root[j], tip[j]), ((u0,v_start),(u1,v_start),(u1,v_end)), 0)
+            triangle((root[i], tip[j], tip[i]), ((u0,v_start),(u1,v_end),(u0,v_end)), 0)
 
     def spray(start, axis, length, breadth):
         direction = axis.normalized()
@@ -244,8 +281,9 @@ def pine_mesh():
             reach = spread*rng.uniform(.78, 1.13)
             bend = origin + forward*reach*.49 - up*rng.uniform(.02,.18)
             end = origin + forward*reach + up*rng.uniform(-.12,.28)
-            branch(origin, bend, .042 * (1-level/18))
-            branch(bend, end, .024 * (1-level/18))
+            v_start = (level*.317 + i*.593) % 1
+            branch(origin, bend, .042 * (1-level/18), v_start)
+            branch(bend, end, .024 * (1-level/18), v_start + .52*(bend-origin).length)
             length = .41 + .23*reach
             spray(bend.lerp(end,.70), forward+up*.37, length, length*.67)
             for j, t in enumerate((.42, .56, .69, .82)):
@@ -315,13 +353,14 @@ def studio():
     scene.camera = camera
     camera.data.type = "ORTHO"
     scene.render.engine = "CYCLES"
-    scene.cycles.samples = 40
+    scene.cycles.samples = 32
     scene.cycles.transparent_max_bounces = 18
     scene.cycles.use_denoising = False
     scene.render.image_settings.file_format = "PNG"
     for name, location, target, scale, resolution in [
         ("pine-full", (11,-17,9.0), (0,0,3.49), 8.85, (760,950)),
         ("pine-detail", (-8,-10,5.8), (0,0,2.24), 5.15, (900,720)),
+        ("pine-bark", (1.8,-5.8,1.65), (0,0,.88), 2.10, (760,900)),
     ]:
         camera.location = location
         point_at(camera, target)

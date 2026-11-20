@@ -10,9 +10,10 @@ A pine with an irregular crown, tapered woody branches, and fine needle silhouet
 | [pine.blend](assets/pine/pine.blend) | Editable Blender source with packed textures and a Z-up scene |
 | [textures](assets/pine/textures) | Separate 512 × 512 PNG maps for bark and needles |
 | [Full render](renders/pine-full.png) | Full silhouette |
-| [Detail render](renders/pine-detail.png) | Bark and lower foliage |
+| [Detail render](renders/pine-detail.png) | Branches and lower foliage |
+| [Bark close-up](renders/pine-bark.png) | Trunk texture and lower branch junctions |
 
-Base color uses sRGB. The needle base color includes a linear alpha mask with a cutoff of 0.40, as configured in the GLB. Read the other maps as linear data. Normal maps are tangent-space with +Y (OpenGL) convention. The ORM map stores ambient occlusion in red, roughness in green, and metallic in blue. Height maps are optional source textures supplied separately.
+The trunk and branches share a tileable bark texture with raised plates, dark fissures, and gray-brown and reddish tones. Branch UVs follow the length of the wood. Base color uses sRGB. The needle base color includes a linear alpha mask with a cutoff of 0.40, as configured in the GLB. Read the other maps as linear data. Normal maps are tangent-space with +Y (OpenGL) convention. The ORM map stores ambient occlusion in red, roughness in green, and metallic in blue. Height maps are optional source textures supplied separately.
 
 The GLB uses glTF's meter scale and Y-up convention. The asset includes a single static mesh. Studio lighting and ground are used only for the renders.
 
