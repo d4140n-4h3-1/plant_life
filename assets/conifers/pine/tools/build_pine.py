@@ -23,7 +23,8 @@ def write_png(path, pixels):
                 + struct.pack(">I", zlib.crc32(kind + data)))
 
     data = b"".join(b"\0" + row.tobytes() for row in pixels)
-    header = struct.pack(">IIBBBBB", SIZE, SIZE, 8, 6 if pixels.shape[-1] == 4 else 2, 0, 0, 0)
+    height, width = pixels.shape[:2]
+    header = struct.pack(">IIBBBBB", width, height, 8, 6 if pixels.shape[-1] == 4 else 2, 0, 0, 0)
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
                      + chunk(b"IDAT", zlib.compress(data, 7)) + chunk(b"IEND", b""))
 
@@ -82,18 +83,18 @@ def needle_spray(spruce=False):
     return rgba, height
 
 
-def bark_swatch_maps(path):
+def bark_swatch_maps(path, resolution=SIZE):
     """Derive tileable PBR inputs from a bark swatch."""
     image = bpy.data.images.load(str(path))
     image.colorspace_settings.name = "Non-Color"
-    assert tuple(image.size) == (SIZE, SIZE)
-    pixels = np.empty(SIZE*SIZE*4, dtype=np.float32)
+    assert tuple(image.size) == (resolution, resolution)
+    pixels = np.empty(resolution*resolution*4, dtype=np.float32)
     image.pixels.foreach_get(pixels)
-    color = pixels.reshape(SIZE, SIZE, 4)[::-1, :, :3].copy()
+    color = pixels.reshape(resolution, resolution, 4)[::-1, :, :3].copy()
     bpy.data.images.remove(image)
 
     # Match opposing edges with smoothly decaying corrections.
-    band = 26
+    band = round(26*resolution/SIZE)
     fade = (.5 + .5*np.cos(np.linspace(0, np.pi, band)))[:, None, None]
     for axis in (0, 1):
         rows = np.swapaxes(color, 0, axis)
@@ -102,7 +103,7 @@ def bark_swatch_maps(path):
         rows[-band:] -= fade[::-1]*difference
 
     def blur(values, radius):
-        frequencies = np.fft.fftfreq(SIZE)
+        frequencies = np.fft.fftfreq(resolution)*resolution/SIZE
         kernel = np.exp(-2*np.pi**2*radius**2
                         * (frequencies[:, None]**2 + frequencies[None, :]**2))
         return np.fft.ifft2(np.fft.fft2(values)*kernel).real
@@ -118,7 +119,7 @@ def bark_swatch_maps(path):
     return color, height, roughness, occlusion
 
 
-def material(kind, maps, *, label="Pine", texture_data=None):
+def material(kind, maps, *, label="Pine", texture_data=None, tileable=False):
     if texture_data is not None:
         color, height, roughness, occlusion, relief = texture_data
     elif kind == "bark":
@@ -130,8 +131,14 @@ def material(kind, maps, *, label="Pine", texture_data=None):
         occlusion = np.clip(.88 + .12*height, 0, 1)
         relief = .40
 
-    dy = (np.roll(height, -1, 0) - np.roll(height, 1, 0)) / 2
-    dx = (np.roll(height, -1, 1) - np.roll(height, 1, 1)) / 2
+    # Tileable surface maps repeat the first row and column at the far edges.
+    # Differentiate the unique samples so the normals agree on both sides as well.
+    grid = height[:-1,:-1] if tileable else height
+    dy = (np.roll(grid, -1, 0) - np.roll(grid, 1, 0)) / 2
+    dx = (np.roll(grid, -1, 1) - np.roll(grid, 1, 1)) / 2
+    if tileable:
+        dx = np.pad(dx,((0,1),(0,1)),mode="wrap")
+        dy = np.pad(dy,((0,1),(0,1)),mode="wrap")
     normal = np.stack((-dx * relief, dy * relief, np.ones_like(dx)), axis=-1)
     normal /= np.linalg.norm(normal, axis=-1, keepdims=True)
     orm = np.stack((occlusion, roughness, np.zeros_like(height)), axis=-1)

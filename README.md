@@ -165,3 +165,7 @@ A meadow grass with dense cylindrical seed heads. See the [meadow foxtail asset 
 ### Woodland clearing
 
 A winding trail bordered by pine, Norway spruce, bilberry, and sheep fescue. See the [Blender scene, GLB, rendered views, and rebuild instructions](environments/woodland-clearing/README.md).
+
+## Ground and rocks
+
+[Forest loam](assets/terrain/forest-loam/README.md) is a one-meter tiling soil material. [Granite rocks](assets/rocks/granite-rocks/README.md) supplies a cobble, slab, and boulder with seeded geometry and size variation.
