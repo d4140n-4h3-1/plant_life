@@ -134,6 +134,10 @@ A woodland grass with broad blades and nodding spikelets. See the [wood melick a
 
 [Hard fern](assets/ferns/hard-fern/README.md) forms a narrow-frond rosette for shade. [Bracken](assets/ferns/bracken/README.md) has larger, divided fronds for woodland edges and clearings.
 
+## Wildflowers
+
+[Foxglove](assets/wildflowers/foxglove/README.md) adds tall pink bell spikes. [Wood sorrel](assets/wildflowers/wood-sorrel/README.md) adds low heart-shaped foliage and white flowers.
+
 ## Environments
 
 ### Woodland clearing

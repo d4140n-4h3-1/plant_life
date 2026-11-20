@@ -126,7 +126,7 @@ def stem_maps():
     return color,.52+.17*fiber,.82+.09*patches,.87+.10*fiber,1.2
 
 
-def finish(tree, maps, name, sources, seed, ranges):
+def finish(tree, maps, name, sources, seed, ranges, smooth_kinds=(0,)):
     if seed is not None:
         rng=Random(f"{name}:{seed}")
         factors=[rng.uniform(*limits) for limits in ranges]
@@ -143,7 +143,7 @@ def finish(tree, maps, name, sources, seed, ranges):
     uv_layer=mesh.uv_layers.new(name="UVMap")
     for poly, tex, kind in zip(mesh.polygons,tree.uvs,tree.kinds):
         poly.material_index=kind
-        poly.use_smooth=kind==0
+        poly.use_smooth=kind in smooth_kinds
         for index,uv in zip(poly.loop_indices,tex):
             uv_layer.data[index].uv=uv
     obj=bpy.data.objects.new(name,mesh)
