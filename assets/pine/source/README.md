@@ -1,0 +1,7 @@
+# Pine bark swatch
+
+OpenAI ImageGen generated the source image. The included swatch is the RGB image resized to 512 × 512. The Blender build script adjusts the opposing edges and reduces broad lighting variation. Height, normal, roughness, and occlusion are estimates derived from the image.
+
+## Generation prompt
+
+> Generate a single square flat material texture image for a game PBR workflow, photorealistic real mature Scots pine bark, tightly cropped orthographic straight-on surface scan filling the ENTIRE image edge to edge. Seamlessly tileable in both directions. Gray brown muted weathered rough wood with subtle warm cinnamon brown underneath lifted flaky edges, very fine fibrous strands and dust, shallow narrow broken irregular mostly vertical grooves interspersed with irregular small elongated overlapping flakes, believable species detail. Low contrast soft uniform diffuse cross-polarized ambient lighting, neutral white balance, essentially flat albedo for texture mapping, no strong highlights, no directional cast shadows, no lighting gradient or vignette, essentially even median tone. Macro real photograph quality with no brush strokes, no cartoons, no ink outlines, no orderly mosaic, no evenly spaced stripes, no rocks or cobblestone appearance. Frame is one single continuous bark surface, no visible tree shape, background, foliage, roots, borders, charts, text or multiple samples. Real-life swatch about 50 cm wide.

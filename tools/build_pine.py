@@ -83,52 +83,45 @@ def needle_spray():
 
 
 def pine_bark():
-    """Make tileable bark plates with broken edges, flakes and fine grain."""
-    v, u = np.mgrid[:SIZE, :SIZE] / SIZE
-    x, y = tau*u, tau*v
-    columns, rows = 22, 24
-    plate_x = columns*u + .28*np.sin(5*y+2*x) + .12*np.sin(19*y-11*x)
-    plate_y = rows*v + .46*np.sin(7*x-3*y) + .19*np.sin(17*x+9*y)
-    column, row = np.floor(plate_x).astype(int), np.floor(plate_y).astype(int)
-    variation = np.random.default_rng(71).random((rows, columns, 3))
-    nearest = np.full_like(u, np.inf)
-    second = nearest.copy()
-    pigment = np.zeros_like(u)
-    for offset_y in (-1, 0, 1):
-        for offset_x in (-1, 0, 1):
-            px, py = column + offset_x, row + offset_y
-            jitter_x, jitter_y, plate_tone = variation[py % rows, px % columns].transpose(2, 0, 1)
-            distance = ((px + .18 + .64*jitter_x - plate_x)**2
-                        + (py + .18 + .64*jitter_y - plate_y)**2)
-            closer = distance < nearest
-            second = np.where(closer, nearest, np.minimum(second, distance))
-            nearest = np.minimum(nearest, distance)
-            pigment = np.where(closer, plate_tone, pigment)
+    """Derive tileable PBR inputs from the generated pine bark swatch."""
+    image = bpy.data.images.load(str(ASSET / "source" / "bark_swatch.png"))
+    image.colorspace_settings.name = "Non-Color"
+    assert tuple(image.size) == (SIZE, SIZE)
+    pixels = np.empty(SIZE*SIZE*4, dtype=np.float32)
+    image.pixels.foreach_get(pixels)
+    color = pixels.reshape(SIZE, SIZE, 4)[::-1, :, :3].copy()
+    bpy.data.images.remove(image)
 
-    gap = np.sqrt(second) - np.sqrt(nearest)
-    fissure = np.exp(-gap/.082)
-    bulge = np.clip(gap*1.30, 0, 1)
-    flakes = (0.5 + 0.5*np.sin(48*y + 24*x + 2.2*np.sin(13*x-5*y)))**6
-    fibers = np.sin(97*x + 2*y + 1.7*np.sin(14*y-3*x))
-    weathering = .52 + .23*np.sin(5*x+7*y) + .18*np.sin(11*x-13*y)
-    grit = np.random.default_rng(37).normal(0, 1, u.shape)
-    height = np.clip(.52 + .16*bulge - .35*fissure + .055*flakes
-                     + .032*fibers + .025*grit + .11*pigment, 0, 1)
+    # Match opposing edges with smoothly decaying corrections.
+    band = 26
+    fade = (.5 + .5*np.cos(np.linspace(0, np.pi, band)))[:, None, None]
+    for axis in (0, 1):
+        rows = np.swapaxes(color, 0, axis)
+        difference = .5*(rows[-1]-rows[0])
+        rows[:band] += fade*difference
+        rows[-band:] -= fade[::-1]*difference
 
-    rust = np.array((.37, .216, .137))
-    ash = np.array((.56, .51, .43))
-    mix = np.clip(.56*weathering + .46*pigment + .11*flakes, 0, 1)[..., None]
-    color = rust + (ash-rust)*mix
-    color *= (.84 + .18*bulge - .67*fissure + .062*fibers + .040*grit)[..., None]
-    roughness = np.clip(.93 + .05*fissure - .105*flakes - .06*bulge, 0, 1)
-    occlusion = 1 - .42*fissure
+    def blur(values, radius):
+        frequencies = np.fft.fftfreq(SIZE)
+        kernel = np.exp(-2*np.pi**2*radius**2
+                        * (frequencies[:, None]**2 + frequencies[None, :]**2))
+        return np.fft.ifft2(np.fft.fft2(values)*kernel).real
+
+    luma = color @ np.array((.2126, .7152, .0722))
+    # Reduce broad baked lighting before using the swatch as base color.
+    lighting = blur(luma, 38)
+    color = np.clip(color - .64*(lighting-np.median(lighting))[..., None], 0, 1)
+    height = np.clip(.51 + 2.8*(blur(luma, .75) - blur(luma, 21)), 0, 1)
+    recess = np.maximum(.48-height, 0)
+    roughness = np.clip(.86 + .16*recess + .16*(blur(luma, 4)-luma), 0, 1)
+    occlusion = 1 - .63*recess
     return color, height, roughness, occlusion
 
 
 def material(kind):
     if kind == "bark":
         color, height, roughness, occlusion = pine_bark()
-        relief = 3.4
+        relief = 2.7
     else:
         color, height = needle_spray()
         roughness = np.clip(.74 - .13*(height-.5), 0, 1)
