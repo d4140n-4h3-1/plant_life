@@ -1,5 +1,5 @@
 """Build the pine, texture maps and studio renders with Blender 4.3."""
-from math import cos, sin, tau
+from math import cos, exp, sin, tau
 from pathlib import Path
 from random import Random
 import struct
@@ -200,17 +200,40 @@ def pine_mesh():
         uvs.append(coords)
         materials.append(material_index)
 
-    # One continuous trunk with alternating root flares.
-    sides = 10
+    # Closely spaced rings let the buttresses taper into the lower trunk.
+    profile = [
+        # height, radius, center x/y, root flare
+        (0, .265, 0, 0, 1),
+        (.055, .269, .002, -.003, .90),
+        (.135, .261, .008, -.009, .61),
+        (.24, .247, .020, -.016, .32),
+        (.39, .231, .036, -.019, .12),
+        (.57, .221, .050, -.019, .032),
+        (.81, .214, .055, -.013, 0),
+        (1.12, .199, .044, .004, 0),
+        (1.51, .183, .016, .027, 0),
+        (2.15, .162, -.039, .040, 0),
+        (2.92, .141, -.063, .026, 0),
+        (3.73, .118, -.039, -.014, 0),
+        (4.57, .094, .008, -.029, 0),
+        (5.40, .070, .051, -.006, 0),
+        (6.14, .043, .062, .035, 0),
+        (6.73, .018, .084, .042, 0),
+    ]
+    buttresses = [(.24, .22, .24), (1.49, .32, .26), (2.92, .18, .23),
+                  (4.27, .38, .25), (5.50, .22, .24)]
+    sides = 20
     trunk = []
-    for z, radius, cx, cy in [(0, .32, 0, 0), (.25, .24, 0, 0),
-                               (1.4, .19, -.04, .01), (3.5, .12, .055, -.02),
-                               (5.3, .07, -.03, .06), (6.73, .022, .08, .04)]:
-        trunk.append([
-            vertex((cx + cos(i*tau/sides)*radius*(1.24 if z == 0 and i%2 else 1),
-                    cy + sin(i*tau/sides)*radius*(1.24 if z == 0 and i%2 else 1), z))
-            for i in range(sides)
-        ])
+    for z, radius, cx, cy, flare in profile:
+        ring = []
+        for i in range(sides):
+            angle = i*tau/sides
+            ridge = sum(length*exp((cos(angle-direction)-1)/width**2)
+                        for direction, length, width in buttresses)
+            oval = 1 + .077*cos(2*angle+.29+z*.37) + .038*sin(5*angle+z*.71)
+            r = radius*oval + flare*ridge
+            ring.append(vertex((cx+cos(angle)*r, cy+sin(angle)*r, z)))
+        trunk.append(ring)
     for lower, upper in zip(trunk, trunk[1:]):
         v0, v1 = (vertices[ring[0]][2]*.52 for ring in (lower, upper))
         for i in range(sides):
@@ -218,13 +241,27 @@ def pine_mesh():
             u0, u1 = i/sides, (i+1)/sides
             triangle((lower[i], lower[j], upper[j]), ((u0,v0),(u1,v0),(u1,v1)), 0)
             triangle((lower[i], upper[j], upper[i]), ((u0,v0),(u1,v1),(u0,v1)), 0)
+    smooth_trunk_faces = len(faces)
 
-    for ring, invert in [(trunk[0], True), (trunk[-1], False)]:
+    for ring, record, invert in [(trunk[0], profile[0], True),
+                                 (trunk[-1], profile[-1], False)]:
+        z, _, cx, cy, _ = record
+        center = vertex((cx, cy, z))
         cap_uv = [(.5 + .45*cos(i*tau/sides), .5 + .45*sin(i*tau/sides))
                   for i in range(sides)]
-        for i in range(1, sides-1):
-            ids = (0, i+1, i) if invert else (0, i, i+1)
-            triangle(tuple(ring[j] for j in ids), tuple(cap_uv[j] for j in ids), 0)
+        for i in range(sides):
+            j = (i+1) % sides
+            first, second = (j, i) if invert else (i, j)
+            triangle((center, ring[first], ring[second]),
+                     ((.5,.5), cap_uv[first], cap_uv[second]), 0)
+
+    def trunk_center(height):
+        for lower, upper in zip(profile, profile[1:]):
+            if height <= upper[0]:
+                t = (height-lower[0])/(upper[0]-lower[0])
+                return Vector((lower[2]*(1-t)+upper[2]*t,
+                               lower[3]*(1-t)+upper[3]*t, height))
+        return Vector((profile[-1][2], profile[-1][3], height))
 
     up = Vector((0, 0, 1))
 
@@ -275,8 +312,9 @@ def pine_mesh():
             bend = origin + forward*reach*.49 - up*rng.uniform(.02,.18)
             end = origin + forward*reach + up*rng.uniform(-.12,.28)
             v_start = (level*.317 + i*.593) % 1
-            branch(origin, bend, .042 * (1-level/18), v_start)
-            branch(bend, end, .024 * (1-level/18), v_start + .52*(bend-origin).length)
+            attachment = trunk_center(origin.z)
+            branch(attachment, bend, .042 * (1-level/18), v_start)
+            branch(bend, end, .024 * (1-level/18), v_start + .52*(bend-attachment).length)
             length = .41 + .23*reach
             spray(bend.lerp(end,.70), forward+up*.37, length, length*.67)
             for j, t in enumerate((.42, .56, .69, .82)):
@@ -304,6 +342,7 @@ def pine_mesh():
     uv_layer = mesh.uv_layers.new(name="UVMap")
     for polygon, coords, material_index in zip(mesh.polygons, uvs, materials):
         polygon.material_index = material_index
+        polygon.use_smooth = polygon.index < smooth_trunk_faces
         for index, uv in zip(polygon.loop_indices, coords):
             uv_layer.data[index].uv = uv
     obj = bpy.data.objects.new("Pine", mesh)

@@ -2,7 +2,7 @@
 
 ## Pine
 
-A pine with an irregular crown, tapered woody branches, and fine needle silhouettes. The mesh is 7.2 m tall, uses 4,524 triangles, and has its origin at the base of the trunk for ground placement. One opaque material covers the bark. A double-sided, alpha-masked material covers the crossed foliage cards.
+A pine with an irregular crown, tapered woody branches, fine needle silhouettes, and a curved trunk with five root buttresses. The mesh is 7.2 m tall, uses 5,048 triangles, and has its origin at the base of the trunk for ground placement. One opaque material covers the bark. A double-sided, alpha-masked material covers the crossed foliage cards.
 
 | File | Use |
 | --- | --- |
