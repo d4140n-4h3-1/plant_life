@@ -85,3 +85,9 @@ To rebuild the SPIR-V with the Vulkan SDK's `glslc`, run:
 cd assets/conifers/pine/tools
 glslc --target-env=vulkan1.0 pine_wind.vert -o pine_wind.vert.spv
 ```
+
+## Shrubs
+
+### Bilberry
+
+A compact forest-understory shrub with small, serrated leaves and blue fruit. See the [bilberry model, texture maps, renders, and generator](assets/shrubs/bilberry/README.md).

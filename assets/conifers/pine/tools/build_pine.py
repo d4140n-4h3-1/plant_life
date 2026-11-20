@@ -161,7 +161,7 @@ def material(kind, maps, *, label="Pine", texture_data=None):
         textures[name] = node
 
     links.new(textures["basecolor"].outputs["Color"], shader.inputs["Base Color"])
-    if kind == "needles":
+    if color.shape[-1] == 4:
         clip = nodes.new("ShaderNodeMath")
         clip.operation = "GREATER_THAN"
         clip.inputs[1].default_value = .40
@@ -407,7 +407,7 @@ def point_at(obj, target):
 def studio_camera(framing=1, ground_size=200):
     ground_mat = bpy.data.materials.new("Studio sage")
     ground_mat.diffuse_color = (.21, .27, .245, 1)
-    bpy.ops.mesh.primitive_plane_add(size=ground_size, location=(0, 0, -.014))
+    bpy.ops.mesh.primitive_plane_add(size=ground_size, location=(0, 0, -.014*min(1, framing)))
     bpy.context.object.data.materials.append(ground_mat)
 
     for name, location, power, size, color in [
