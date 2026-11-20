@@ -1,8 +1,10 @@
 """Build the pine, texture maps and studio renders with Blender 4.3."""
+import argparse
 from math import cos, exp, sin, tau
 from pathlib import Path
-from random import Random
+from random import Random, SystemRandom
 import struct
+import sys
 import zlib
 
 import bpy
@@ -11,10 +13,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "assets/pine"
-MAPS = ASSET / "textures"
 RENDERS = ROOT / "renders"
 SIZE = 512
-rng = Random(48)
 
 
 def write_png(path, pixels):
@@ -118,7 +118,7 @@ def pine_bark():
     return color, height, roughness, occlusion
 
 
-def material(kind):
+def material(kind, maps):
     if kind == "bark":
         color, height, roughness, occlusion = pine_bark()
         relief = 2.7
@@ -137,7 +137,7 @@ def material(kind):
     paths = {}
     for name, pixels in [("basecolor", color), ("normal", normal*.5 + .5),
                          ("orm", orm), ("height", grayscale)]:
-        path = MAPS / f"{kind}_{name}.png"
+        path = maps / f"{kind}_{name}.png"
         write_png(path, pixels)
         paths[name] = path
 
@@ -188,7 +188,8 @@ def material(kind):
     return mat
 
 
-def pine_mesh():
+def pine_mesh(maps, seed=None):
+    rng = Random(48 if seed is None else seed)
     vertices, faces, uvs, materials = [], [], [], []
 
     def vertex(point):
@@ -241,7 +242,7 @@ def pine_mesh():
             u0, u1 = i/sides, (i+1)/sides
             triangle((lower[i], lower[j], upper[j]), ((u0,v0),(u1,v0),(u1,v1)), 0)
             triangle((lower[i], upper[j], upper[i]), ((u0,v0),(u1,v1),(u0,v1)), 0)
-    smooth_trunk_faces = len(faces)
+    smooth_faces = set(range(len(faces)))
 
     for ring, record, invert in [(trunk[0], profile[0], True),
                                  (trunk[-1], profile[-1], False)]:
@@ -265,23 +266,40 @@ def pine_mesh():
 
     up = Vector((0, 0, 1))
 
-    def branch(start, end, radius, v_start):
-        segment = end-start
-        axis = segment.normalized()
-        v_end = v_start + .52*segment.length
-        side = up.cross(axis).normalized()
-        vertical = axis.cross(side)
-        rings = [
-            [vertex(center + (cos(i*tau/5)*side + sin(i*tau/5)*vertical)*width)
-             for i in range(5)]
-            for center, width in ((start, radius), (end, radius*.14))
-        ]
-        root, tip = rings
-        for i in range(5):
-            j = (i+1)%5
-            u0, u1 = i/5, (i+1)/5
-            triangle((root[i], root[j], tip[j]), ((u0,v_start),(u1,v_start),(u1,v_end)), 0)
-            triangle((root[i], tip[j], tip[i]), ((u0,v_start),(u1,v_end),(u0,v_end)), 0)
+    def woody_shoot(centers, radii, sides, v_start):
+        """Sweep shared rings along a branch or taper a twig into a point."""
+        first_face = len(faces)
+        rings, lengths = [], [v_start]
+        for start, end in zip(centers, centers[1:]):
+            lengths.append(lengths[-1] + .52*(end-start).length)
+
+        for i, (center, radius) in enumerate(zip(centers, radii)):
+            previous = centers[max(0, i-1)]
+            following = centers[i+1]
+            axis = (following-previous).normalized()
+            side = up.cross(axis).normalized()
+            vertical = axis.cross(side)
+            ring = [
+                vertex(center + radius*(cos(k*tau/sides)*side + sin(k*tau/sides)*vertical))
+                for k in range(sides)
+            ]
+            rings.append(ring)
+
+        for row, (lower, upper) in enumerate(zip(rings, rings[1:])):
+            v0, v1 = lengths[row:row+2]
+            for i in range(sides):
+                j = (i+1)%sides
+                u0, u1 = i/sides, (i+1)/sides
+                triangle((lower[i], lower[j], upper[j]), ((u0,v0),(u1,v0),(u1,v1)), 0)
+                triangle((lower[i], upper[j], upper[i]), ((u0,v0),(u1,v1),(u0,v1)), 0)
+
+        tip = vertex(centers[-1])
+        for i in range(sides):
+            j = (i+1)%sides
+            u0, u1 = i/sides, (i+1)/sides
+            triangle((rings[-1][i], rings[-1][j], tip),
+                     ((u0,lengths[-2]),(u1,lengths[-2]),((u0+u1)*.5,lengths[-1])), 0)
+        smooth_faces.update(range(first_face, len(faces)))
 
     def spray(start, axis, length, breadth):
         direction = axis.normalized()
@@ -313,8 +331,12 @@ def pine_mesh():
             end = origin + forward*reach + up*rng.uniform(-.12,.28)
             v_start = (level*.317 + i*.593) % 1
             attachment = trunk_center(origin.z)
-            branch(attachment, bend, .042 * (1-level/18), v_start)
-            branch(bend, end, .024 * (1-level/18), v_start + .52*(bend-attachment).length)
+            shoulder = attachment.lerp(bend, .50) + up*.014
+            outer = bend.lerp(end, .64) - up*.026
+            thickness = .071 * (1-level/17) * (.86 + .19*reach)
+            woody_shoot((attachment, shoulder, bend, outer, end),
+                        (thickness, .71*thickness, .48*thickness, .20*thickness),
+                        5, v_start)
             length = .41 + .23*reach
             spray(bend.lerp(end,.70), forward+up*.37, length, length*.67)
             for j, t in enumerate((.42, .56, .69, .82)):
@@ -325,6 +347,12 @@ def pine_mesh():
                     heading += up*rng.uniform(-.12,.65)
                     scale = length*rng.uniform(.69,1.25)*(1.03-.07*j)
                     spray(start, heading, scale, scale*rng.uniform(.57,.88))
+                    # Build forks from the limb into the central stems of the sprays.
+                    limb = (shoulder.lerp(bend, (t-.25)*4) if t < .5
+                            else bend.lerp(outer, (t-.5)/.32))
+                    twig_tip = start + heading.normalized() * (.68*scale)
+                    twig_radius = thickness * (.25 - .035*j)
+                    woody_shoot((limb, twig_tip), (twig_radius,), 3, v_start+t)
             spray(origin.lerp(bend,.38), forward+up*.82, length*.84, length*.71)
 
     for i in range(6):
@@ -333,22 +361,40 @@ def pine_mesh():
         spray(start, Vector((.32*cos(angle),.32*sin(angle),1)), .58, .29)
     spray(Vector((.08,.04,6.64)), up, .56, .26)
 
+    if seed is not None:
+        # Transform wood and foliage together with a ground-level origin.
+        shape = Random(f"pine-shape:{seed}")
+        height = shape.uniform(5.2, 9.4)
+        width = shape.uniform(.77, 1.26)
+        crown = shape.uniform(-.24, .33)
+        asymmetry = shape.uniform(-.15, .15)
+        lean_x, lean_y = (shape.uniform(-.43, .43) for _ in range(2))
+        for i, (x, y, z) in enumerate(vertices):
+            fraction = z/7.2
+            spread = width*(1+crown*sin(tau*.5*fraction))
+            bend = fraction**1.6
+            vertices[i] = ((1+asymmetry)*x*spread + lean_x*bend,
+                           (1-asymmetry)*y*spread + lean_y*bend,
+                           height*fraction)
+
     mesh = bpy.data.meshes.new("Pine")
     mesh.from_pydata(vertices, [], faces)
     assert not mesh.validate()
     mesh.update()
     for kind in ("bark", "needles"):
-        mesh.materials.append(material(kind))
+        mesh.materials.append(material(kind, maps))
     uv_layer = mesh.uv_layers.new(name="UVMap")
     for polygon, coords, material_index in zip(mesh.polygons, uvs, materials):
         polygon.material_index = material_index
-        polygon.use_smooth = polygon.index < smooth_trunk_faces
+        polygon.use_smooth = polygon.index in smooth_faces
         for index, uv in zip(polygon.loop_indices, coords):
             uv_layer.data[index].uv = uv
     obj = bpy.data.objects.new("Pine", mesh)
     bpy.context.collection.objects.link(obj)
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
+    if seed is not None:
+        obj["pine_seed"] = str(seed)
     return obj
 
 
@@ -356,7 +402,7 @@ def point_at(obj, target):
     obj.rotation_euler = (Vector(target) - obj.location).to_track_quat("-Z", "Y").to_euler()
 
 
-def studio():
+def studio(render_dir, framing=1):
     ground_mat = bpy.data.materials.new("Studio sage")
     ground_mat.diffuse_color = (.21, .27, .245, 1)
     bpy.ops.mesh.primitive_plane_add(size=200, location=(0, 0, -.014))
@@ -368,11 +414,11 @@ def studio():
         ("Rim", (2, 5, 8), 2200, 5, (1, .93, .74)),
     ]:
         data = bpy.data.lights.new(name, "AREA")
-        data.energy, data.size, data.color = power, size, color
+        data.energy, data.size, data.color = power*framing**2, size*framing, color
         light = bpy.data.objects.new(name, data)
         bpy.context.collection.objects.link(light)
-        light.location = location
-        point_at(light, (0, 0, 3.5))
+        light.location = Vector(location)*framing
+        point_at(light, (0, 0, 3.5*framing))
 
     scene = bpy.context.scene
     world = bpy.data.worlds.new("Studio ambient")
@@ -391,38 +437,63 @@ def studio():
     scene.render.image_settings.file_format = "PNG"
     for name, location, target, scale, resolution in [
         ("pine-full", (11,-17,9.0), (0,0,3.49), 8.85, (760,950)),
-        ("pine-detail", (-8,-10,5.8), (0,0,2.24), 5.15, (900,720)),
+        ("pine-detail", (-8,-10,5.3), (0,0,2.03), 4.54, (900,720)),
         ("pine-bark", (1.8,-5.8,1.65), (0,0,.88), 2.10, (760,900)),
     ]:
-        camera.location = location
-        point_at(camera, target)
-        camera.data.ortho_scale = scale
+        camera.location = Vector(location)*framing
+        point_at(camera, Vector(target)*framing)
+        camera.data.ortho_scale = scale*framing
         scene.render.resolution_x, scene.render.resolution_y = resolution
-        scene.render.filepath = str(RENDERS / f"{name}.png")
+        scene.render.filepath = str(render_dir / f"{name}.png")
         bpy.ops.render.render(write_still=True)
 
 
 def main():
-    MAPS.mkdir(parents=True, exist_ok=True)
-    RENDERS.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    variation = parser.add_mutually_exclusive_group()
+    variation.add_argument("--seed", type=int, help="Generate a reproducible pine variant.")
+    variation.add_argument("--random", action="store_true", help="Choose a new variant seed.")
+    parser.add_argument("--output-dir", type=Path, help="Directory for the model and maps.")
+    parser.add_argument("--no-renders", action="store_true", help="Skip studio previews.")
+    args = parser.parse_args(sys.argv[sys.argv.index("--")+1:] if "--" in sys.argv else [])
+    seed = SystemRandom().getrandbits(64) if args.random else args.seed
+    if seed is not None:
+        print(f"Pine seed: {seed}", flush=True)
+    if args.output_dir is not None:
+        asset_dir = args.output_dir.resolve()
+    elif seed is not None:
+        asset_dir = ROOT / "variants" / f"pine-{seed}"
+    else:
+        asset_dir = ASSET
+    render_dir = RENDERS if asset_dir == ASSET else asset_dir / "renders"
+    maps = asset_dir / "textures"
+    maps.mkdir(parents=True, exist_ok=True)
+
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     scene.unit_settings.system = "METRIC"
-    obj = pine_mesh()
+    obj = pine_mesh(maps, seed)
+    bpy.context.view_layer.update()
+    width, depth, height = obj.dimensions
+    framing = max(height/7.2, width/5, depth/5) if seed is not None else 1
     for screen in bpy.data.screens:
         for area in screen.areas:
             if area.type == "VIEW_3D":
                 view = area.spaces.active
-                view.region_3d.view_location = (0, 0, 3.5)
-                view.region_3d.view_distance = 11
+                view.region_3d.view_location = (0, 0, height*.49)
+                view.region_3d.view_distance = 11*framing
                 view.region_3d.view_rotation = Vector((7,-11,4)).to_track_quat("Z", "Y")
                 view.shading.type = "MATERIAL"
     bpy.context.preferences.filepaths.save_version = 0
-    bpy.ops.wm.save_as_mainfile(filepath=str(ASSET / "pine.blend"), relative_remap=False)
-    bpy.ops.export_scene.gltf(filepath=str(ASSET / "pine.glb"), use_selection=True,
-                              export_format="GLB", export_tangents=True)
+    bpy.ops.wm.save_as_mainfile(filepath=str(asset_dir / "pine.blend"), relative_remap=False)
+    bpy.ops.export_scene.gltf(filepath=str(asset_dir / "pine.glb"), use_selection=True,
+                              export_format="GLB", export_tangents=True,
+                              export_extras=seed is not None)
     print(f"Pine triangles: {len(obj.data.polygons)}", flush=True)
-    studio()
+    print(f"Pine dimensions: {width:.2f} × {depth:.2f} × {height:.2f} m", flush=True)
+    if not args.no_renders:
+        render_dir.mkdir(parents=True, exist_ok=True)
+        studio(render_dir, framing)
 
 
 if __name__ == "__main__":
