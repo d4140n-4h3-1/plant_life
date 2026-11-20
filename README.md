@@ -97,3 +97,9 @@ A compact forest-understory shrub with small, serrated leaves and blue fruit. Se
 ### Sheep fescue
 
 A fine-bladed tuft with dry seed heads. See the [models, texture maps, generator, and scatter example](assets/grasses/sheep-fescue/README.md).
+
+## Environments
+
+### Woodland clearing
+
+A winding trail bordered by pine, Norway spruce, bilberry, and sheep fescue. See the [Blender scene, GLB, rendered views, and rebuild instructions](environments/woodland-clearing/README.md).
