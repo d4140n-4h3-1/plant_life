@@ -12,8 +12,7 @@ from mathutils import Vector
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSET = ROOT / "assets/pine"
-RENDERS = ROOT / "renders"
+ASSET = ROOT / "assets" / "conifers" / "pine"
 SIZE = 512
 
 
@@ -465,7 +464,7 @@ def main():
         asset_dir = ROOT / "variants" / f"pine-{seed}"
     else:
         asset_dir = ASSET
-    render_dir = RENDERS if asset_dir == ASSET else asset_dir / "renders"
+    render_dir = asset_dir / "renders"
     maps = asset_dir / "textures"
     maps.mkdir(parents=True, exist_ok=True)
 
