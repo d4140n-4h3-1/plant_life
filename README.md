@@ -16,6 +16,7 @@ A pine with an irregular crown, curved branches with tapered lateral twigs, fine
 | [Full render](assets/conifers/pine/renders/pine-full.png) | Full silhouette |
 | [Detail render](assets/conifers/pine/renders/pine-detail.png) | Branches and lower foliage |
 | [Bark close-up](assets/conifers/pine/renders/pine-bark.png) | Trunk texture and lower branch junctions |
+| [Wind GIF](assets/conifers/pine/renders/pine-wind.gif) | Loop of the pine bending and the outer branches fluttering |
 
 The trunk and branches share a tileable bark texture derived from a photorealistic, AI-generated Scots pine swatch. The builder reduces broad lighting in the base color and estimates the relief and surface response from the swatch. One UV set (`UVMap` in Blender and `TEXCOORD_0` in glTF) wraps the trunk and branches and tiles the bark along their length. The foliage cards intentionally overlap in UV space to reuse the needle texture. Base color uses sRGB. The needle base color includes a linear alpha mask with a cutoff of 0.40, as configured in the GLB. Read the other maps as linear data. Normal maps are tangent-space with +Y (OpenGL) convention. The ORM map stores ambient occlusion in red, roughness in green, and metallic in blue. Height maps are optional source textures supplied separately.
 
@@ -38,3 +39,17 @@ blender --background --python-exit-code 1 --python assets/conifers/pine/tools/bu
 ```
 
 This writes `pine.blend`, `pine.glb`, and the texture maps to `assets/conifers/pine/variants/pine-27/`. Set `--output-dir PATH` to choose a different folder. Omit `--no-renders` to include studio previews. Use `--random` in place of `--seed 27` to choose and print a new seed. Run without either flag to rebuild the reference pine.
+
+
+### Wind
+
+Use [`pine_wind.glsl`](assets/conifers/pine/tools/pine_wind.glsl) in a vertex shader for the Y-up GLB. Add the returned offset to the local vertex position before transforming it into world space. Use the tree's local height (7.2 m for the reference pine), elapsed time in seconds, a local XZ vector pointing downwind, a strength, and a per-instance phase in radians. Strength `0` gives still air. Use the same deformation in any shadow and depth passes.
+
+To record the Blender preview again, install ImageMagick 7 and run:
+
+```sh
+blender --background assets/conifers/pine/pine.blend --python-exit-code 1 \
+  --python assets/conifers/pine/tools/record_wind.py
+```
+
+The recorder writes a 2.4-second GIF and accepts `-- --output PATH` to save it elsewhere.

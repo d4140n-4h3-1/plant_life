@@ -400,7 +400,7 @@ def point_at(obj, target):
     obj.rotation_euler = (Vector(target) - obj.location).to_track_quat("-Z", "Y").to_euler()
 
 
-def studio(render_dir, framing=1):
+def studio_camera(framing=1):
     ground_mat = bpy.data.materials.new("Studio sage")
     ground_mat.diffuse_color = (.21, .27, .245, 1)
     bpy.ops.mesh.primitive_plane_add(size=200, location=(0, 0, -.014))
@@ -433,6 +433,11 @@ def studio(render_dir, framing=1):
     scene.cycles.transparent_max_bounces = 18
     scene.cycles.use_denoising = False
     scene.render.image_settings.file_format = "PNG"
+    return scene, camera
+
+
+def studio(render_dir, framing=1):
+    scene, camera = studio_camera(framing)
     for name, location, target, scale, resolution in [
         ("pine-full", (11,-17,9.0), (0,0,3.49), 8.85, (760,950)),
         ("pine-detail", (-8,-10,5.3), (0,0,2.03), 4.54, (900,720)),
