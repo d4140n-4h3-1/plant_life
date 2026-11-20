@@ -8,6 +8,14 @@ Keep each tree in its own folder under `assets/conifers/`. Its Blender and GLB f
 
 A narrow conifer with hanging branchlets and elongated cones. See the model, maps, seeded examples, and tools in the [Norway spruce folder](assets/conifers/norway-spruce/README.md).
 
+### Silver fir
+
+A layered evergreen with flat needle sprays and upright cones. See the [silver fir models, textures, and generator](assets/conifers/silver-fir/README.md).
+
+### European larch
+
+An airy deciduous conifer in summer foliage, with needles clustered on spur shoots. See the [European larch models, textures, and generator](assets/conifers/european-larch/README.md).
+
 ### Pine
 
 A pine with an irregular crown, curved branches with tapered lateral twigs, fine needle silhouettes, and a curved trunk with five root buttresses. The mesh is 7.2 m tall, uses 7,895 triangles, and has its origin at the base of the trunk for ground placement. One opaque material covers the bark. A double-sided, alpha-masked material covers the crossed foliage cards.
