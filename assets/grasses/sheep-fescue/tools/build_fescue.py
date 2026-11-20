@@ -19,7 +19,7 @@ SHOTS = [
 ]
 
 
-def grass_maps(tall=False):
+def grass_maps(tall=False, melick=False):
     """Make a striped atlas for fresh blades, weathered blades, and seed heads."""
     v,u = np.mgrid[:SIZE, :SIZE]/SIZE
     band = np.floor(u*3).astype(int)
@@ -30,6 +30,8 @@ def grass_maps(tall=False):
     greens = np.array([(.17,.31,.20),(.25,.37,.218),(.49,.43,.25)])
     if tall:
         greens=np.array([(.195,.347,.135),(.275,.412,.164),(.58,.444,.237)])
+    if melick:
+        greens=np.array([(.212,.384,.149),(.27,.407,.184),(.44,.313,.299)])
     colors = greens[band].copy()
     base = np.clip((v-.70)*2.1,0,.6)
     tips = np.clip((.23-v)*3.4,0,1)
@@ -43,9 +45,11 @@ def grass_maps(tall=False):
     return colors,height,roughness,.87+.11*vein,1.1
 
 
-def fescue_mesh(maps, seed=None, grass_material=None, *, tall=False):
+def fescue_mesh(maps, seed=None, grass_material=None, *, tall=False, melick=False):
     name = "Tufted Hairgrass" if tall else "Sheep Fescue"
-    rng = Random((610 if tall else 209) if seed is None else seed)
+    if melick:
+        name = "Wood Melick"
+    rng = Random((931 if melick else 610 if tall else 209) if seed is None else seed)
     vertices, triangles, uvs = [], [], []
 
     def vertex(p):
@@ -74,7 +78,7 @@ def fescue_mesh(maps, seed=None, grass_material=None, *, tall=False):
         a,b = rings[-1]
         face((a,b,vertex(path[-1])),((lo,(count-1)/count),(hi,(count-1)/count),((lo+hi)*.5,1)))
 
-    for i in range(110):
+    for i in range(85 if melick else 110):
         angle = i*2.39996+rng.uniform(-.42,.42)
         ray = Vector((cos(angle),sin(angle),0))
         cross = UP.cross(ray)
@@ -85,9 +89,12 @@ def fescue_mesh(maps, seed=None, grass_material=None, *, tall=False):
         if tall:
             reach *= 1.27
             rise *= 1.59
+        if melick:
+            reach *= 1.34
+            rise *= 1.39
         peak = rng.uniform(1.30,2.69)
         turn = rng.uniform(-.29,.29)
-        width = rng.uniform(.0020,.0055)
+        width = rng.uniform(.0054,.011) if melick else rng.uniform(.0020,.0055)
         curve = []
         for t in (0,.23,.49,.76,1):
             distance = reach*t**1.69
@@ -96,13 +103,28 @@ def fescue_mesh(maps, seed=None, grass_material=None, *, tall=False):
         ribbon(curve,(width*.39,width,width*.86,width*.45),
                1 if rng.random()<.33 else 0,rng.uniform(-1.22,1.22))
 
-    for i in range(10 if tall else 6):
+    for i in range(8 if melick else 10 if tall else 6):
         angle = i*2.39996+.65
         ray = Vector((cos(angle),sin(angle),0))
         cross = UP.cross(ray)
-        height = rng.uniform(.68,.98) if tall else rng.uniform(.255,.352)
+        height = rng.uniform(.50,.73) if melick else rng.uniform(.68,.98) if tall else rng.uniform(.255,.352)
         base = ray*rng.uniform(.015,.039)
-        lean = rng.uniform(.07,.155) if tall else rng.uniform(.058,.104)
+        lean = rng.uniform(.15,.24) if melick else rng.uniform(.07,.155) if tall else rng.uniform(.058,.104)
+        if melick:
+            ratios = (0,.42,.68,.82,.93,1)
+            path = [base+ray*lean*t*t+UP*(height*t-.16*max((t-.62)/.38,0)**2)
+                    for t in ratios]
+            ribbon(path,(.0022,.0019,.00165,.0013,.0008),1,rng.uniform(-.25,.25))
+            for j in range(9):
+                t = .55+.050*j
+                n = next(k for k in range(len(ratios)-1) if ratios[k+1] >= t)
+                joint = path[n].lerp(path[n+1],(t-ratios[n])/(ratios[n+1]-ratios[n]))
+                side = cross*(1 if j%2 else -1)
+                tip = joint+ray*.009+side*.012-UP*.014
+                ribbon((joint,tip),(.0010,),1)
+                end = tip+(ray*.43+side*.39-UP*.81)*rng.uniform(.014,.023)
+                ribbon((tip,tip.lerp(end,.48),end),(.0043,.0066),2,rng.uniform(-.25,.25))
+            continue
         path = [base+ray*lean*t*t+UP*(height*t) for t in (0,.44,.73,.92,1)]
         ribbon(path,(.0019,.0016,.0014,.00094),2,rng.uniform(-.42,.42))
         if tall:
@@ -130,11 +152,11 @@ def fescue_mesh(maps, seed=None, grass_material=None, *, tall=False):
             ribbon((joint,mid,tip),(.0016,.0032),2,rng.uniform(-.65,.65))
 
     if seed is not None:
-        shape = Random(f"{'hairgrass' if tall else 'fescue'}-shape:{seed}")
+        shape = Random(f"{'melick' if melick else 'hairgrass' if tall else 'fescue'}-shape:{seed}")
         sx,sy,sz = shape.uniform(.79,1.22),shape.uniform(.78,1.19),shape.uniform(.79,1.20)
         lean_x,lean_y = shape.uniform(-.029,.029),shape.uniform(-.029,.029)
         for i,(x,y,z) in enumerate(vertices):
-            bend = (z/(.96 if tall else .35))**2
+            bend = (z/(.64 if melick else .96 if tall else .35))**2
             vertices[i] = (x*sx+lean_x*bend,y*sy+lean_y*bend,z*sz)
 
     mesh = bpy.data.meshes.new(name)
@@ -142,7 +164,7 @@ def fescue_mesh(maps, seed=None, grass_material=None, *, tall=False):
     assert not mesh.validate()
     mesh.update()
     if grass_material is None:
-        grass_material = material("grass",maps,label=name,texture_data=grass_maps(tall))
+        grass_material = material("grass",maps,label=name,texture_data=grass_maps(tall,melick))
         grass_material.use_backface_culling = False
     mesh.materials.append(grass_material)
     layer = mesh.uv_layers.new(name="UVMap")
@@ -154,7 +176,7 @@ def fescue_mesh(maps, seed=None, grass_material=None, *, tall=False):
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     if seed is not None:
-        obj["hairgrass_seed" if tall else "fescue_seed"] = str(seed)
+        obj["melick_seed" if melick else "hairgrass_seed" if tall else "fescue_seed"] = str(seed)
     return obj
 
 

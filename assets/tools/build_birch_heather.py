@@ -15,6 +15,7 @@ from build_pine import SIZE, bark_swatch_maps, main, material
 
 BIRCH = ASSETS/"deciduous"/"silver-birch"
 HEATHER = ASSETS/"shrubs"/"common-heather"
+BROOM = ASSETS/"shrubs"/"common-broom"
 
 
 def atlas(kind):
@@ -22,7 +23,10 @@ def atlas(kind):
     rng = Random(162 if kind=="leaves" else 341)
     rgba=np.zeros((SIZE,SIZE,4))
     birch=kind=="leaves"
+    broom=kind in ("broom-leaves","broom-flowers")
     rgba[..., :3]=(.19,.32,.11) if kind!="blossoms" else (.43,.23,.33)
+    if kind=="broom-flowers":
+        rgba[..., :3]=(.58,.45,.09)
     height=np.full((SIZE,SIZE),.5)
     stem=np.array((.31,.26,.14))
 
@@ -61,8 +65,8 @@ def atlas(kind):
     root=np.array((254.,492.))
     top=np.array((259.,25.))
     shoots=[(root,top)]
-    for i in range(9 if birch else 13):
-        y=441-i*(43 if birch else 29)
+    for i in range(7 if broom else 9 if birch else 13):
+        y=441-i*(56 if broom else 43 if birch else 29)
         for sign in (-1,1):
             start=np.array((256.,y+rng.uniform(-12,12)))
             span=(145-7*i) if birch else (130-4*i)
@@ -72,7 +76,7 @@ def atlas(kind):
         lateral=np.array((-direction[1],direction[0]))
         central=np.linalg.norm(end-start)>300
         mark(start,end,2.9,stem)
-        count=(13 if central else 6) if birch else (27 if central else 14)
+        count=(19 if central else 4) if broom else (13 if central else 6) if birch else (27 if central else 14)
         for i in range(count):
             p=start+(end-start)*(i+.44)/count
             sign=-1 if i%2 else 1
@@ -81,6 +85,23 @@ def atlas(kind):
                 heading=direction*rng.uniform(.25,.75)+sign*lateral*rng.uniform(.65,1.07)
                 color=np.array((.246,.433,.126))*rng.uniform(.78,1.25)
                 mark(p,p+heading*blade,blade*.43,color,leaf=True)
+            elif broom:
+                p=p+sign*lateral*3
+                if kind=="broom-leaves" or i%4==0:
+                    for finger in (-1,0,1):
+                        heading=direction*.79+lateral*(sign*.53+finger*.52)
+                        tip=p+heading*rng.uniform(10,23)
+                        mark(p,tip,rng.uniform(3,6),np.array((.29,.415,.124))*rng.uniform(.81,1.12),leaf=True)
+                else:
+                    heading=direction*.46+lateral*sign*.87
+                    pedicel=p+heading*9
+                    mark(p,pedicel,2.0,stem)
+                    sepia=np.array((.76,.47,.046))*rng.uniform(.91,1.15)
+                    yellow=np.array((.95,.77,.10))*rng.uniform(.91,1.08)
+                    for lobe in (-1,0,1):
+                        fan=heading+lateral*lobe*.26+direction*lobe*.24
+                        mark(pedicel,pedicel+fan*rng.uniform(15,21),rng.uniform(5.7,8.9),sepia,leaf=True)
+                    mark(pedicel+heading*3,pedicel+heading*19+direction*5,7.6,yellow,leaf=True)
             elif kind=="greenery" or i<int(count*.35):
                 blade=rng.uniform(9.5,17.0) if kind=="greenery" else rng.uniform(6.2,12.0)
                 color=np.array((.188,.288,.13))*rng.uniform(.72,1.21)
@@ -245,3 +266,58 @@ def build_heather():
     shots=[("heather-full",(12,-17,11),(0,0,2.4),16.8,(850,740)),
            ("heather-detail",(8,-14,9),(-.78,1.1,3.7),7.0,(820,680))]
     main(HEATHER,heather_mesh,"Common heather",shots,(.86,.86,.56),.56/7.2,22)
+
+
+
+def broom_mesh(maps, seed=None):
+    rng=Random(728 if seed is None else seed)
+    tree=BranchMesh()
+    for index in range(32):
+        rank=(index/31)**.62
+        angle=2.39996*index+rng.uniform(-.29,.29)
+        ray=Vector((cos(angle),sin(angle),0))
+        side=UP.cross(ray)
+        base=ray*(.017+.14*rank)
+        spread=(.22+.74*rank)*rng.uniform(.82,1.17)
+        rise=(1.53-.77*rank)*rng.uniform(.81,1.21)
+        elbow=base+ray*.31*spread+UP*.39*rise
+        shoulder=base+ray*.72*spread+UP*.77*rise
+        top=base+ray*spread+UP*rise+side*rng.uniform(-.13,.13)
+        thickness=rng.uniform(.0041,.0091)
+        first=len(tree.positions)
+        tree.shoot((base,elbow,shoulder,top),(thickness,.67*thickness,.36*thickness),5,index*.19)
+        for v in tree.positions[first:first+5]:
+            v.z=0
+        for row,(a,b,t) in enumerate(((base,elbow,.87),(elbow,shoulder,.24),
+                                      (elbow,shoulder,.71),(shoulder,top,.19),
+                                      (shoulder,top,.60),(shoulder,top,.87))):
+            joint=a.lerp(b,t)
+            sign=1 if (row+index)%2 else -1
+            heading=ray*rng.uniform(.33,.77)+side*sign*rng.uniform(.23,.79)+UP*rng.uniform(.61,1.22)
+            length=rng.uniform(.24,.43)*(1-.068*row)
+            fork=joint+heading.normalized()*length*.78
+            tree.shoot((joint,fork),(.23*thickness,),3,index*.19+row*.16)
+            face=len(tree.kinds)
+            tree.spray(joint,heading,length,length*.61,1.12)
+            if row>=2 and (index+row)%5!=0:
+                tree.kinds[face:]=[2]*4
+            if row in (1,3):
+                face=len(tree.kinds)
+                tree.spray(joint.lerp(fork,.36),heading-side*sign*.55,length*.63,length*.40,1.23)
+                if row==3:
+                    tree.kinds[face:]=[2]*4
+        face=len(tree.kinds)
+        tree.spray(shoulder.lerp(top,.55),ray*.51+UP,.25,.145,.95)
+        tree.kinds[face:]=[2]*4
+
+    stems=stem_maps()
+    green_shoots=(np.clip(stems[0]*np.array((.80,1.27,.77)),0,1),*stems[1:])
+    return finish(tree,maps,"Common Broom",
+                  (("stems",green_shoots),("leaves",atlas("broom-leaves")),("flowers",atlas("broom-flowers"))),
+                  seed,((.75,1.23),(.76,1.24),(.77,1.20)))
+
+
+def build_broom():
+    shots=[("broom-full",(12,-17,10),(0,0,2.97),12.9,(850,750)),
+           ("broom-detail",(8,-14,8),(0,0,3.87),6.3,(850,700))]
+    main(BROOM,broom_mesh,"Common broom",shots,(2.40,2.40,1.68),1.68/7.2,24)

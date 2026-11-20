@@ -112,6 +112,10 @@ A compact forest-understory shrub with small, serrated leaves and blue fruit. Se
 
 A low, flowering shrub with pink late-summer sprays. See the [common heather asset and generator](assets/shrubs/common-heather/README.md).
 
+### Common broom
+
+An upright shrub with yellow spring flowers. See the [common broom asset and generator](assets/shrubs/common-broom/README.md).
+
 ## Grasses
 
 ### Sheep fescue
@@ -121,6 +125,10 @@ A fine-bladed tuft with dry seed heads. See the [models, texture maps, generator
 ### Tufted hairgrass
 
 A taller clump grass with airy bronze panicles. See the [tufted hairgrass asset and generator](assets/grasses/tufted-hairgrass/README.md).
+
+### Wood melick
+
+A woodland grass with broad blades and nodding spikelets. See the [wood melick asset and generator](assets/grasses/wood-melick/README.md).
 
 ## Ferns
 
