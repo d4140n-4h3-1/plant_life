@@ -25,9 +25,61 @@ def write_png(path, pixels):
                 + struct.pack(">I", zlib.crc32(kind + data)))
 
     data = b"".join(b"\0" + row.tobytes() for row in pixels)
-    header = struct.pack(">IIBBBBB", SIZE, SIZE, 8, 2, 0, 0, 0)
+    header = struct.pack(">IIBBBBB", SIZE, SIZE, 8, 6 if pixels.shape[-1] == 4 else 2, 0, 0, 0)
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
                      + chunk(b"IDAT", zlib.compress(data, 7)) + chunk(b"IEND", b""))
+
+
+def needle_spray():
+    """Rasterize one shoot with side stems and individual needle silhouettes."""
+    random = Random(94)
+    rgba = np.zeros((SIZE, SIZE, 4))
+    rgba[..., :3] = (.19, .30, .135)
+    height = np.full((SIZE, SIZE), .5)
+
+    def stroke(start, end, width, color, ridge):
+        margin = int(width + 3)
+        x0 = max(0, int(min(start[0], end[0])) - margin)
+        x1 = min(SIZE, int(max(start[0], end[0])) + margin)
+        y0 = max(0, int(min(start[1], end[1])) - margin)
+        y1 = min(SIZE, int(max(start[1], end[1])) + margin)
+        y, x = np.mgrid[y0:y1, x0:x1]
+        dx, dy = end[0]-start[0], end[1]-start[1]
+        t = np.clip(((x-start[0])*dx + (y-start[1])*dy)/(dx*dx + dy*dy), 0, 1)
+        distance = np.hypot(x-start[0]-dx*t, y-start[1]-dy*t)
+        alpha = np.clip(width*(1-.72*t) + .6 - distance, 0, 1)
+        patch = rgba[y0:y1, x0:x1]
+        inside = alpha > 0
+        shade = .74 + .37*t + .15*np.clip(1-distance/width, 0, 1)
+        patch[..., :3][inside] = np.asarray(color) * shade[inside, None]
+        patch[..., 3] = np.maximum(patch[..., 3], alpha)
+        height[y0:y1, x0:x1][inside] = .5 + ridge*alpha[inside]
+
+    stem = (.32, .24, .11)
+    shoots = [((254, 496), (259, 25), 42, 14)]
+    for i in range(11):
+        y = 454 - i*34
+        for side in (-1, 1):
+            spread = (126 - 6.5*i) * random.uniform(.81, 1.17)
+            shoots.append(((255, y + random.uniform(-11, 11)),
+                           (255 + side*spread, y - random.uniform(42, 102)),
+                           11, 10))
+    for index, (start, end, count, reach) in enumerate(reversed(shoots)):
+        dx, dy = end[0]-start[0], end[1]-start[1]
+        length = np.hypot(dx, dy)
+        along = np.array([dx, dy])/length
+        across = np.array([-along[1], along[0]])
+        stroke(start, end, 3.4 if count > 20 else 2.2, stem, .24)
+        for i in range(count):
+            for side in (-1, 1):
+                t = (i + random.uniform(.45, 1.1))/(count+1)
+                root = np.asarray(start) + t*np.array([dx,dy])
+                size = (19 + reach*random.random())*(1-.34*t)*random.uniform(.7, 1.4)
+                tip = root + along*size + across*side*size*random.uniform(.55, 1.46)
+                value = random.uniform(.7, 1.26)
+                base = np.array((.26, .40, .165) if index % 3 else (.30, .43, .17))
+                stroke(root, tip, random.uniform(1.45, 2.65), base*value, .23)
+    return rgba, height
 
 
 def material(kind):
@@ -40,16 +92,12 @@ def material(kind):
         height = .47 + .28*plates - .18*splits + .06*np.cos(3*y+11*x) + .013*noise
         dark, light = (.20, .105, .062), (.56, .36, .22)
         rough, relief = .95, 1.65
+        blend = np.clip((height - .18) / .66, 0, 1)[..., None]
+        color = np.array(dark) + blend * (np.array(light) - dark)
     else:
-        patches = .53 + .14*np.cos(9*x+4*y) + .10*np.cos(4*x-7*y)
-        sweep = 65*x + 39*y + 2.4*np.sin(8*x-7*y)
-        needles = (.5 + .5*np.cos(sweep))**3 * (.5 + .5*np.cos(12*x-21*y))
-        height = patches + .14*needles + .033*noise
-        dark, light = (.068, .18, .119), (.33, .48, .233)
-        rough, relief = .85, .82
+        color, height = needle_spray()
+        rough, relief = .74, .40
 
-    blend = np.clip((height - .18) / .66, 0, 1)[..., None]
-    color = np.array(dark) + blend * (np.array(light) - dark)
     dy = (np.roll(height, -1, 0) - np.roll(height, 1, 0)) / 2
     dx = (np.roll(height, -1, 1) - np.roll(height, 1, 1)) / 2
     normal = np.stack((-dx * relief, dy * relief, np.ones_like(dx)), axis=-1)
@@ -83,6 +131,15 @@ def material(kind):
         textures[name] = node
 
     links.new(textures["basecolor"].outputs["Color"], shader.inputs["Base Color"])
+    if kind == "needles":
+        clip = nodes.new("ShaderNodeMath")
+        clip.operation = "GREATER_THAN"
+        clip.inputs[1].default_value = .40
+        clip.location = (-270, 40)
+        links.new(textures["basecolor"].outputs["Alpha"], clip.inputs[0])
+        links.new(clip.outputs[0], shader.inputs["Alpha"])
+    else:
+        mat.use_backface_culling = True
     normal_map = nodes.new("ShaderNodeNormalMap")
     normal_map.location = (-280, -240)
     links.new(textures["normal"].outputs["Color"], normal_map.inputs["Color"])
@@ -141,42 +198,71 @@ def pine_mesh():
             ids = (0, i+1, i) if invert else (0, i, i+1)
             triangle(tuple(ring[j] for j in ids), tuple(cap_uv[j] for j in ids), 0)
 
-    tiers = [(1.62, 1.96, 1.56, 19), (2.37, 1.75, 1.49, 17),
-             (3.15, 1.53, 1.43, 17), (3.91, 1.27, 1.36, 15),
-             (4.66, 1.04, 1.26, 13), (5.36, .80, 1.17, 13),
-             (5.99, .59, 1.21, 11)]
-    for tier, (z, radius, height, count) in enumerate(tiers):
-        phase = tier * 1.83
-        cx = .12*sin(tier*2.1)
-        cy = .10*cos(tier*2.6)
-        profile = [
-            (phase + i*tau/count + rng.uniform(-.065,.065),
-             rng.uniform(.88,1.12) * (.76 if i%3 == 1 else 1),
-             rng.uniform(-.19,.14) if i%3 != 1 else rng.uniform(.03,.23))
-            for i in range(count)
+    up = Vector((0, 0, 1))
+
+    def branch(start, end, radius):
+        axis = (end-start).normalized()
+        side = up.cross(axis).normalized()
+        vertical = axis.cross(side)
+        rings = [
+            [vertex(center + (cos(i*tau/5)*side + sin(i*tau/5)*vertical)*width)
+             for i in range(5)]
+            for center, width in ((start, radius), (end, radius*.14))
         ]
-        rings = []
-        for scale, elevation in [(1, 0), (.68, .37), (.29, .70)]:
-            rings.append([
-                vertex((cx + cos(a)*radius*r*scale, cy + sin(a)*radius*r*scale,
-                        z + height*elevation + irregularity*scale))
-                for a, r, irregularity in profile
-            ])
-        tip = vertex((cx+.13, cy-.055, z+height))
-        bottom = vertex((cx, cy, z+.19))
-        uv_offset = tier*.27
+        root, tip = rings
+        for i in range(5):
+            j = (i+1)%5
+            u0, u1 = i/5, (i+1)/5
+            triangle((root[i], root[j], tip[j]), ((u0,0),(u1,0),(u1,.7)), 0)
+            triangle((root[i], tip[j], tip[i]), ((u0,0),(u1,.7),(u0,.7)), 0)
+
+    def spray(start, axis, length, breadth):
+        direction = axis.normalized()
+        side = up.cross(direction).normalized()
+        if side.length_squared < .01:
+            side = Vector((1, 0, 0))
+        vertical = direction.cross(side)
+        for angle in (rng.uniform(-.30, .30), rng.uniform(.84, 1.67)):
+            offset = (side*cos(angle) + vertical*sin(angle))*breadth*.5
+            end = start+direction*length
+            corners = [vertex(p) for p in
+                       (start-offset*.72, start+offset*.72, end+offset, end-offset)]
+            triangle((corners[0], corners[1], corners[2]), ((0,0),(1,0),(1,1)), 1)
+            triangle((corners[0], corners[2], corners[3]), ((0,0),(1,1),(0,1)), 1)
+
+    # Irregular whorls leave small gaps through the crown.
+    for level in range(13):
+        z = 1.39 + level*.409
+        spread = 1.99 * (1 - level/14)**.84
+        count = 6 if level < 8 else 5
+        phase = level*1.79
         for i in range(count):
-            j = (i+1) % count
-            u0, u1 = 2*i/count + uv_offset, 2*(i+1)/count + uv_offset
-            for row, (lower, upper) in enumerate(zip(rings, rings[1:])):
-                v0, v1 = (row*.42 + uv_offset, (row+1)*.42 + uv_offset)
-                triangle((lower[i], lower[j], upper[j]), ((u0,v0),(u1,v0),(u1,v1)), 1)
-                triangle((lower[i], upper[j], upper[i]), ((u0,v0),(u1,v1),(u0,v1)), 1)
-            mid = (u0+u1)/2
-            triangle((rings[-1][i], rings[-1][j], tip),
-                     ((u0,.84+uv_offset),(u1,.84+uv_offset),(mid,1.15+uv_offset)), 1)
-            triangle((rings[0][j], rings[0][i], bottom),
-                     ((u1,uv_offset),(u0,uv_offset),(mid,uv_offset-.47)), 1)
+            angle = phase + i*tau/count + rng.uniform(-.17,.17)
+            forward = Vector((cos(angle), sin(angle), 0))
+            across = up.cross(forward)
+            origin = Vector((0, 0, z + rng.uniform(-.14,.14)))
+            reach = spread*rng.uniform(.78, 1.13)
+            bend = origin + forward*reach*.49 - up*rng.uniform(.02,.18)
+            end = origin + forward*reach + up*rng.uniform(-.12,.28)
+            branch(origin, bend, .042 * (1-level/18))
+            branch(bend, end, .024 * (1-level/18))
+            length = .41 + .23*reach
+            spray(bend.lerp(end,.70), forward+up*.37, length, length*.67)
+            for j, t in enumerate((.42, .56, .69, .82)):
+                center = origin.lerp(bend, t*2) if t < .5 else bend.lerp(end, t*2-1)
+                for side in (-1, 1):
+                    start = center + up*rng.uniform(-.04,.075)
+                    heading = forward*rng.uniform(.35,.84) + side*across*rng.uniform(.5,1)
+                    heading += up*rng.uniform(-.12,.65)
+                    scale = length*rng.uniform(.69,1.25)*(1.03-.07*j)
+                    spray(start, heading, scale, scale*rng.uniform(.57,.88))
+            spray(origin.lerp(bend,.38), forward+up*.82, length*.84, length*.71)
+
+    for i in range(6):
+        angle = i*tau/6
+        start = Vector((.06,.04,6.53 + .06*sin(angle)))
+        spray(start, Vector((.32*cos(angle),.32*sin(angle),1)), .58, .29)
+    spray(Vector((.08,.04,6.64)), up, .56, .26)
 
     mesh = bpy.data.meshes.new("Pine")
     mesh.from_pydata(vertices, [], faces)
@@ -229,12 +315,13 @@ def studio():
     scene.camera = camera
     camera.data.type = "ORTHO"
     scene.render.engine = "CYCLES"
-    scene.cycles.samples = 64
+    scene.cycles.samples = 40
+    scene.cycles.transparent_max_bounces = 18
     scene.cycles.use_denoising = False
     scene.render.image_settings.file_format = "PNG"
     for name, location, target, scale, resolution in [
-        ("pine-full", (11,-17,9.0), (0,0,3.49), 8.65, (840,1050)),
-        ("pine-detail", (-8,-10,5.8), (0,0,1.85), 4.6, (1000,800)),
+        ("pine-full", (11,-17,9.0), (0,0,3.49), 8.85, (760,950)),
+        ("pine-detail", (-8,-10,5.8), (0,0,2.24), 5.15, (900,720)),
     ]:
         camera.location = location
         point_at(camera, target)
