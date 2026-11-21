@@ -173,3 +173,7 @@ A loam trail winding through rock outcrops and a mixed canopy, with ferns and wi
 ## Ground and rocks
 
 [Forest loam](assets/terrain/forest-loam/README.md) is a one-meter tiling soil material. [Granite rocks](assets/rocks/granite-rocks/README.md) supplies a cobble, slab, and boulder with seeded geometry and size variation.
+
+## Props
+
+[Hanging lantern](assets/props/hanging-lantern/README.md) includes an animated chain pivot, a warm point light, and a Blender lighting test scene.
