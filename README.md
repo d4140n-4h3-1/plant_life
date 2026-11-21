@@ -177,3 +177,5 @@ A loam trail winding through rock outcrops and a mixed canopy, with ferns and wi
 ## Props
 
 [Hanging lantern](assets/props/hanging-lantern/README.md) includes an animated chain pivot, a warm point light, and a Blender lighting test scene.
+
+[Player lantern](assets/props/player-lantern/README.md) includes a hand attachment, an animated hinge, and a PS1-style carry test in Blender.
