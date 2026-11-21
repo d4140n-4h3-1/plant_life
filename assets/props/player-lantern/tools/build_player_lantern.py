@@ -1,8 +1,10 @@
 """Build a low-poly handheld oil lantern and a blocky carry test."""
 import argparse
-from math import cos, radians, sin, tau
+from math import cos, radians, sin, sqrt, tau
 from pathlib import Path
+import subprocess
 import sys
+from tempfile import TemporaryDirectory
 
 import bmesh
 import bpy
@@ -131,6 +133,54 @@ def limb(name, joints, material, sides=8):
     return loft(name, rings, material, sides)
 
 
+def make_walk_leg(proxy, side, trousers, leather):
+    label = "Left" if side == 1 else "Right"
+    thigh = empty(label + " thigh", proxy)
+    shin = empty(label + " shin", proxy)
+    foot = empty(label + " boot", proxy)
+    standing(label + " upper trouser", [(-.445, 0, 0, .054, .06),
+             (-.24, 0, 0, .068, .073), (0, 0, 0, .079, .079)], trousers, 8).parent = thigh
+    standing(label + " lower trouser", [(-.428, 0, 0, .043, .043),
+             (-.18, 0, .009, .052, .058), (.024, 0, 0, .055, .06)], trousers, 8).parent = shin
+    standing(label + " boot leather", [(0, 0, -.052, .062, .121),
+             (.078, 0, -.049, .059, .115), (.135, 0, -.01, .054, .068),
+             (.218, 0, 0, .047, .052)], leather, 8).parent = foot
+    return thigh, shin, foot
+
+
+def pose_walk_leg(leg, side, phase, body_height, frame):
+    # The supporting foot returns at constant speed in character space.
+    # The swing foot eases forward on a raised arc.
+    stride = .48
+    if phase < .58:
+        y = stride * (phase / .58 - .5)
+        lift = 0
+    else:
+        swing = (phase - .58) / .42
+        y = stride * (.5 - swing * swing * (3 - 2 * swing))
+        lift = .125 * sin(swing * tau / 2) ** 1.3
+    x = .103 * side
+    hip = Vector((x, 0, .977))
+    ankle = Vector((x * 1.08, y, .184 + lift - body_height))
+    delta = ankle - hip
+    axis = delta.normalized()
+    # Solve the knee intersection with fixed upper and lower leg lengths.
+    upper, lower = .425, .411
+    reach = delta.length
+    projection = (upper**2 - lower**2 + reach**2) / (2 * reach)
+    forward = Vector((0, -1, 0))
+    bend = (forward - axis * axis.dot(forward)).normalized()
+    knee = hip + axis * projection + bend * sqrt(max(0, upper**2 - projection**2))
+    thigh, shin, foot = leg
+    for obj, first, last in ((thigh, hip, knee), (shin, knee, ankle)):
+        obj.location = first
+        obj.rotation_euler = (first - last).to_track_quat("Z", "Y").to_euler()
+        obj.keyframe_insert(data_path="rotation_euler", frame=frame)
+    foot.location = (ankle.x, ankle.y, lift - body_height - .013)
+    for obj in leg:
+        obj.keyframe_insert(data_path="location", frame=frame)
+
+
 def make_player(grip):
     coat = pbr("Olive canvas", (.19, .23, .107), roughness=.9)
     trim = pbr("Dark canvas seams", (.077, .107, .049), roughness=.88)
@@ -170,13 +220,6 @@ def make_player(grip):
                              (0,-.106,1.593), (0,-.088,1.622)],
              [(0,2,4,5), (1,5,4,3), (2,3,4), (0,5,1)], skin),
         bar("Mouth", (-.021,-.080,1.567), (.021,-.080,1.566), .006, .005, shade, 0),
-        limb("Relaxed sleeve", [((-.179,.004,1.417),.044,.045), ((-.210,.010,1.365),.063,.066),
-                               ((-.238,.024,1.19),.049,.054),
-                               ((-.232,-.015,1.084),.047,.048),
-                               ((-.239,-.064,.973),.034,.034)], coat),
-        limb("Relaxed hand", [((-.239,-.064,.984),.030,.028),
-                             ((-.242,-.080,.935),.031,.026),
-                             ((-.242,-.092,.898),.021,.020)], skin, 6),
     ]
     for side in (-1, 1):
         parts.extend([
@@ -193,20 +236,15 @@ def make_player(grip):
         ])
     for z in (1.147, 1.209, 1.269):
         parts.append(cube("Jacket button", (.014, -.111, z), (.011,.007,.011), brass, .001))
-    for side, shift in ((-1, .074), (1, -.074)):
-        x = .105 * side
-        parts.extend([
-            limb("Tapered trouser leg", [((x*.8,.005,1.016),.080,.088),
-                                        ((x,.008,.771),.073,.078),
-                                        ((x*1.12,-.015+shift*.6,.542),.053,.063),
-                                        ((x*1.15,shift,.198),.041,.044)], cloth),
-            standing("Boot", [(.013,x*1.15,shift-.049,.063,.123),
-                              (.048,x*1.15,shift-.049,.063,.123),
-                              (.088,x*1.15,shift-.045,.060,.114),
-                              (.145,x*1.15,shift,.054,.063),
-                              (.238,x*1.15,shift+.005,.048,.051)], leather, 8),
-        ])
     join("Traveler body and face", parts).parent = proxy
+    legs = {side: make_walk_leg(proxy, side, cloth, leather) for side in (-1, 1)}
+    free_arm = empty("Free arm", proxy, (-.185, 0, 1.4))
+    free_sleeve = limb("Relaxed sleeve", [((.006,.004,.017),.044,.045),
+        ((-.025,.010,-.035),.063,.066), ((-.053,.024,-.21),.049,.054),
+        ((-.047,-.015,-.316),.047,.048), ((-.054,-.064,-.427),.034,.034)], coat)
+    free_hand = limb("Relaxed hand", [((-.054,-.064,-.416),.030,.028),
+        ((-.057,-.080,-.465),.031,.026), ((-.057,-.092,-.502),.021,.020)], skin, 6)
+    join("Free sleeve and hand", [free_sleeve, free_hand]).parent = free_arm
 
     socket = (.081, -.291, -.357)
     sleeve = limb("Bent carry sleeve", [((-.019,0,.012),.042,.045),
@@ -226,18 +264,24 @@ def make_player(grip):
     join("Carry sleeve and gripping hand", [sleeve,cuff,palm,*fingers,thumb]).parent = arm
     hand = empty("Preview hand socket", arm, socket)
     grip.parent = hand
-    for frame in range(0, 49, 4):
-        phase = tau * (frame % 48) / 48
-        arm.rotation_euler.x = radians(6) * sin(phase - .45)
-        arm.keyframe_insert(data_path="rotation_euler", frame=frame)
-        proxy.location.z = .008 * cos(2 * phase)
+    for frame in range(49):
+        cycle = (frame % 24) / 24
+        phase = tau * cycle
+        body_height = -.009 * cos(2 * phase)
+        proxy.location.z = body_height
         proxy.keyframe_insert(data_path="location", frame=frame)
+        arm.rotation_euler.x = radians(7) * cos(phase - .22)
+        arm.keyframe_insert(data_path="rotation_euler", frame=frame)
+        free_arm.rotation_euler.x = -radians(21) * cos(phase)
+        free_arm.keyframe_insert(data_path="rotation_euler", frame=frame)
+        for side, leg in legs.items():
+            pose_walk_leg(leg, side, (cycle + (0 if side == 1 else .5)) % 1,
+                          body_height, frame)
 
 
-def make_preview(scene, grip):
-    make_player(grip)
+def make_preview(scene):
     plaster = pbr("Plaster", (.16, .19, .205), roughness=.91)
-    cube("Test wall", (0, .29, 1.55), (6, .055, 3.1), plaster)
+    cube("Test wall", (0, .41, 1.55), (6, .055, 3.1), plaster)
     cube("Test floor", (0, 0, -.045), (6, 6, .063), plaster)
     world = bpy.data.worlds.new("Dusk world")
     world.use_nodes = True
@@ -255,7 +299,7 @@ def make_preview(scene, grip):
     data.lens = 46
     cam = bpy.data.objects.new("Carry test camera", data)
     bpy.context.collection.objects.link(cam)
-    cam.location = (.96, -2.44, 1.42)
+    cam.location = (1.84, -1.95, 1.40)
     point_at(cam, (.075, -.03, .90))
     scene.camera = cam
     scene.render.engine = "CYCLES"
@@ -285,8 +329,14 @@ def main():
     bpy.ops.export_scene.gltf(filepath=str(output / "player-lantern.glb"),
                               export_format="GLB", export_lights=True,
                               export_animation_mode="ACTIONS")
-    cam = make_preview(scene, grip)
-    scene.frame_set(9)
+    make_player(grip)
+    scene.name = "Lantern Walk"
+    bpy.ops.export_scene.gltf(filepath=str(output / "player-lantern-walk.glb"),
+                              export_format="GLB", export_lights=True,
+                              export_animation_mode="SCENE", export_anim_scene_split_object=False)
+    cam = make_preview(scene)
+    scene.frame_end = 47
+    scene.frame_set(3)
     bpy.context.preferences.filepaths.save_version = 0
     bpy.ops.wm.save_as_mainfile(filepath=str(output / "player-lantern.blend"))
     if not args.no_renders:
@@ -294,10 +344,26 @@ def main():
         renders.mkdir(exist_ok=True)
         scene.render.filepath = str(renders / "carry-test.png")
         bpy.ops.render.render(write_still=True)
+        old_location, old_rotation = cam.location.copy(), cam.rotation_euler.copy()
         cam.location = (.64, -1.03, 1.09)
         point_at(cam, (.26, -.22, .87))
         scene.render.filepath = str(renders / "grip-detail.png")
         bpy.ops.render.render(write_still=True)
+
+        cam.location, cam.rotation_euler = old_location, old_rotation
+        scene.render.resolution_x, scene.render.resolution_y = 250, 286
+        scene.cycles.samples = 8
+        with TemporaryDirectory(prefix="lantern-walk-") as temp:
+            command = ["magick"]
+            for i, frame in enumerate(range(0, 48, 2)):
+                scene.frame_set(frame)
+                scene.render.filepath = str(Path(temp) / f"{i:02d}.png")
+                bpy.ops.render.render(write_still=True)
+                command.extend(["-delay", str(9 if i % 3 == 2 else 8),
+                                scene.render.filepath])
+            subprocess.run([*command, "-loop", "0", "+dither", "-colors", "96",
+                            "-layers", "Optimize", str(renders / "lantern-walk.gif")],
+                           check=True)
 
 
 if __name__ == "__main__":
