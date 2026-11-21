@@ -98,53 +98,144 @@ def make_lantern():
     return grip
 
 
-def make_preview(scene, grip):
-    coat = pbr("Olive travel coat", (.121, .148, .079), roughness=.88)
-    wrap = pbr("Dark leather", (.080, .047, .027), roughness=.77)
-    skin = pbr("Warm skin", (.44, .237, .138), roughness=.84)
-    cloth = pbr("Charcoal trousers", (.072, .081, .083), roughness=.88)
-    buckle = pbr("Buckle", (.28, .205, .103), .47)
+def loft(name, rings, material, sides=10):
+    """Join tailored elliptical cross sections into a flat-shaded solid."""
+    vertices = []
+    for center, right, forward, width, depth in rings:
+        vertices.extend(center + right * (width * cos(tau * i / sides))
+                        + forward * (depth * sin(tau * i / sides)) for i in range(sides))
+    faces = [tuple(reversed(range(sides)))]
+    for ring in range(len(rings) - 1):
+        for i in range(sides):
+            a = ring * sides + i
+            b = ring * sides + (i + 1) % sides
+            faces.append((a, b, b + sides, a + sides))
+    faces.append(tuple(range(len(vertices) - sides, len(vertices))))
+    return mesh(name, vertices, faces, material)
+
+
+def standing(name, profile, material, sides=10):
+    return loft(name, [(Vector((x, y, z)), Vector((1, 0, 0)),
+                        Vector((0, 1, 0)), width, depth)
+                       for z, x, y, width, depth in profile], material, sides)
+
+
+def limb(name, joints, material, sides=8):
+    across = Vector((1, 0, 0))
+    points = [Vector(center) for center, _, _ in joints]
+    rings = []
+    for i, (_, width, depth) in enumerate(joints):
+        axis = (points[max(i - 1, 0)] - points[min(i + 1, len(points) - 1)]).normalized()
+        front = axis.cross(across).normalized()
+        rings.append((points[i], front.cross(axis).normalized(), -front, width, depth))
+    return loft(name, rings, material, sides)
+
+
+def make_player(grip):
+    coat = pbr("Olive canvas", (.19, .23, .107), roughness=.9)
+    trim = pbr("Dark canvas seams", (.077, .107, .049), roughness=.88)
+    leather = pbr("Brown leather", (.103, .055, .028), roughness=.74)
+    skin = pbr("Warm skin", (.54, .31, .198), roughness=.76)
+    shade = pbr("Lips and ears", (.36, .14, .104), roughness=.81)
+    cloth = pbr("Slate trousers", (.087, .108, .121), roughness=.92)
+    hair = pbr("Dark brown hair", (.058, .026, .014), roughness=.84)
+    eyes = pbr("Eye whites", (.54, .47, .37), roughness=.65)
+    iris = pbr("Hazel pupils", (.057, .044, .025), roughness=.69)
+    brass = pbr("Dull brass buttons", (.31, .199, .068), .44)
     proxy = empty("PS1 player proxy")
-    arm = empty("Carry arm", proxy, (.233, -.005, 1.38))
-    # The proxy is deliberately built with flat silhouettes and rigid segments.
+    arm = empty("Carry arm", proxy, (.196, 0, 1.407))
+
     parts = [
-        cube("Coat", (0, 0, 1.207), (.362, .229, .434), coat, .039),
-        cube("Belt", (0, 0, 1.01), (.363, .222, .061), wrap, .012),
-        cube("Buckle", (.005, -.122, 1.01), (.068, .018, .044), buckle),
-        cube("Scarf", (0, 0, 1.433), (.196, .183, .104), wrap, .022),
-        cube("Head", (0, -.012, 1.573), (.184, .178, .236), skin, .026),
-        cube("Hood", (0, .039, 1.637), (.211, .188, .177), coat, .033),
-        cube("Brow", (0, -.103, 1.596), (.135, .01, .021), wrap),
-        bar("Free sleeve", (-.175, 0, 1.371), (-.248, -.03, 1.047),
-            .109, .107, coat, .013),
-        cube("Free glove", (-.252, -.035, .994), (.083, .073, .113), wrap, .013),
+        standing("Tailored jacket", [
+            (.947, 0, .008, .166, .108), (1.06, 0, .007, .155, .101),
+            (1.17, 0, .013, .144, .099), (1.32, 0, .005, .187, .114),
+            (1.409, 0, .007, .206, .093), (1.465, 0, .009, .118, .072),
+            (1.482, 0, .005, .057, .056)], coat, 12),
+        standing("Belt", [(1.041, 0, .008, .158, .105),
+                          (1.082, 0, .008, .158, .105)], leather, 12),
+        cube("Belt buckle", (.015, -.103, 1.061), (.047, .016, .032), brass, .004),
+        bar("Jacket placket", (0, -.102, 1.09), (0, -.107, 1.37), .019, .013, trim, 0),
+        standing("Neck", [(1.443, 0, .009, .054, .054), (1.555, 0, .012, .045, .052)], skin),
+        standing("Head and jaw", [
+            (1.524, 0, -.013, .036, .064), (1.55, 0, -.004, .065, .076),
+            (1.596, 0, .001, .081, .083), (1.631, 0, .010, .081, .080),
+            (1.665, 0, .009, .078, .079), (1.709, 0, .015, .070, .067),
+            (1.736, 0, .019, .037, .042)], skin, 12),
+        standing("Cropped hair", [
+            (1.663, 0, .038, .081, .062), (1.699, 0, .017, .080, .083),
+            (1.733, -.006, .02, .069, .074),
+            (1.753, -.013, .016, .039, .047)], hair, 12),
+        mesh("Faceted nose", [(-.014,-.076,1.629), (.014,-.076,1.629),
+                             (-.018,-.079,1.586), (.018,-.079,1.586),
+                             (0,-.106,1.593), (0,-.088,1.622)],
+             [(0,2,4,5), (1,5,4,3), (2,3,4), (0,5,1)], skin),
+        bar("Mouth", (-.021,-.080,1.567), (.021,-.080,1.566), .006, .005, shade, 0),
+        limb("Relaxed sleeve", [((-.179,.004,1.417),.044,.045), ((-.210,.010,1.365),.063,.066),
+                               ((-.238,.024,1.19),.049,.054),
+                               ((-.232,-.015,1.084),.047,.048),
+                               ((-.239,-.064,.973),.034,.034)], coat),
+        limb("Relaxed hand", [((-.239,-.064,.984),.030,.028),
+                             ((-.242,-.080,.935),.031,.026),
+                             ((-.242,-.092,.898),.021,.020)], skin, 6),
     ]
     for side in (-1, 1):
         parts.extend([
-            bar("Trouser leg", (.096 * side, 0, .99), (.119 * side, .019 * side, .315),
-                .154, .164, cloth, .018),
-            cube("Boot", (.119 * side, -.043 + .019 * side, .178),
-                 (.157, .252, .338), wrap, .018),
+            standing("Ear", [(1.586,.079*side,.012,.008,.013),
+                             (1.603,.083*side,.016,.013,.019),
+                             (1.630,.081*side,.017,.010,.014)], shade, 6),
+            bar("Eye", (.018*side,-.080,1.623), (.055*side,-.060,1.624),
+                .012, .012, eyes, .001),
+            cube("Pupil", (.035*side,-.077,1.623), (.011,.009,.012), iris),
+            bar("Brow", (.017*side,-.080,1.640), (.059*side,-.059,1.645),
+                .011, .012, hair, .001),
+            bar("Lapel", (.055*side,-.052,1.467), (.012*side,-.110,1.319),
+                .028, .015, trim, 0),
         ])
-    for part in parts:
-        part.parent = proxy
-    elbow = (.036, -.044, -.269)
-    socket = (.038, -.272, -.331)
-    for piece in (
-        bar("Upper carry sleeve", (0, 0, 0), elbow, .106, .109, coat, .012),
-        bar("Lower carry sleeve", elbow, socket, .092, .091, coat, .012),
-        cube("Carry glove", socket, (.080, .067, .064), wrap, .012),
-    ):
-        piece.parent = arm
+    for z in (1.147, 1.209, 1.269):
+        parts.append(cube("Jacket button", (.014, -.111, z), (.011,.007,.011), brass, .001))
+    for side, shift in ((-1, .074), (1, -.074)):
+        x = .105 * side
+        parts.extend([
+            limb("Tapered trouser leg", [((x*.8,.005,1.016),.080,.088),
+                                        ((x,.008,.771),.073,.078),
+                                        ((x*1.12,-.015+shift*.6,.542),.053,.063),
+                                        ((x*1.15,shift,.198),.041,.044)], cloth),
+            standing("Boot", [(.013,x*1.15,shift-.049,.063,.123),
+                              (.048,x*1.15,shift-.049,.063,.123),
+                              (.088,x*1.15,shift-.045,.060,.114),
+                              (.145,x*1.15,shift,.054,.063),
+                              (.238,x*1.15,shift+.005,.048,.051)], leather, 8),
+        ])
+    join("Traveler body and face", parts).parent = proxy
+
+    socket = (.081, -.291, -.357)
+    sleeve = limb("Bent carry sleeve", [((-.019,0,.012),.042,.045),
+                                       ((.015,.002,-.034),.061,.063),
+                                       ((.048,.007,-.126),.054,.055),
+                                       ((.077,-.016,-.234),.052,.052),
+                                       ((.088,-.086,-.282),.046,.047),
+                                       ((.082,-.237,-.339),.035,.035)], coat)
+    cuff = limb("Cuff", [((.082,-.211,-.328),.036,.036),
+                         ((.081,-.248,-.344),.035,.032)], trim)
+    x, y, z = socket
+    palm = cube("Palm", (x, y+.015, z+.012), (.064,.053,.045), skin, .009)
+    fingers = [bar("Curled finger", (x+dx,y-.012,z+.025), (x+dx,y-.017,z-.011),
+                   .014,.018,skin,.002) for dx in (-.024,-.008,.008,.024)]
+    thumb = bar("Thumb", (x+.025,y+.018,z+.018), (x+.035,y-.019,z+.008),
+                .018,.018,skin,.003)
+    join("Carry sleeve and gripping hand", [sleeve,cuff,palm,*fingers,thumb]).parent = arm
     hand = empty("Preview hand socket", arm, socket)
     grip.parent = hand
     for frame in range(0, 49, 4):
         phase = tau * (frame % 48) / 48
-        arm.rotation_euler.x = radians(9) * sin(phase - .45)
+        arm.rotation_euler.x = radians(6) * sin(phase - .45)
         arm.keyframe_insert(data_path="rotation_euler", frame=frame)
-        proxy.location.z = .017 * cos(2 * phase)
+        proxy.location.z = .008 * cos(2 * phase)
         proxy.keyframe_insert(data_path="location", frame=frame)
 
+
+def make_preview(scene, grip):
+    make_player(grip)
     plaster = pbr("Plaster", (.16, .19, .205), roughness=.91)
     cube("Test wall", (0, .29, 1.55), (6, .055, 3.1), plaster)
     cube("Test floor", (0, 0, -.045), (6, 6, .063), plaster)
@@ -154,7 +245,7 @@ def make_preview(scene, grip):
     world.node_tree.nodes.get("Background").inputs["Strength"].default_value = .23
     scene.world = world
     data = bpy.data.lights.new("Cool test fill", "AREA")
-    data.energy, data.size, data.color = 29, 2.1, (.61, .75, 1)
+    data.energy, data.size, data.color = 44, 2.1, (.61, .75, 1)
     fill = bpy.data.objects.new("Cool test fill", data)
     bpy.context.collection.objects.link(fill)
     fill.location = (-1.1, -1.55, 2.4)
@@ -164,8 +255,8 @@ def make_preview(scene, grip):
     data.lens = 46
     cam = bpy.data.objects.new("Carry test camera", data)
     bpy.context.collection.objects.link(cam)
-    cam.location = (1.31, -2.5, 1.47)
-    point_at(cam, (.075, -.03, .99))
+    cam.location = (.96, -2.44, 1.42)
+    point_at(cam, (.075, -.03, .90))
     scene.camera = cam
     scene.render.engine = "CYCLES"
     scene.cycles.samples = 40
@@ -203,8 +294,8 @@ def main():
         renders.mkdir(exist_ok=True)
         scene.render.filepath = str(renders / "carry-test.png")
         bpy.ops.render.render(write_still=True)
-        cam.location = (.64, -.95, 1.04)
-        point_at(cam, (.26, -.22, .86))
+        cam.location = (.64, -1.03, 1.09)
+        point_at(cam, (.26, -.22, .87))
         scene.render.filepath = str(renders / "grip-detail.png")
         bpy.ops.render.render(write_still=True)
 

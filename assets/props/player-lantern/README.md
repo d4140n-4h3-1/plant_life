@@ -1,6 +1,6 @@
 # Player lantern
 
-An 896-triangle handheld oil lantern with a brass grip, dark steel bail, and a squat copper body. It is approximately 41 cm tall from grip to base. Flat-shaded geometry and materials fit the blocky PS1-style player proxy in the Blender carry test. The portable prop uses material colors and emissive flame geometry.
+An 896-triangle handheld oil lantern with a brass grip, dark steel bail, and a squat copper body. It is approximately 41 cm tall from grip to base. The Blender carry test uses a flat-shaded PS1-style traveler with a modeled face and a hand posed around the grip. The portable prop uses material colors and emissive flame geometry.
 
 | File | Contents |
 | --- | --- |
