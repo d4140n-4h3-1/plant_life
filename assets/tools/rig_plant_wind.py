@@ -83,16 +83,36 @@ def rig(source, category):
     origin = np.zeros(3)
     anchor = joint(nodes, "Wind Anchor", origin)
     joint_positions = [origin]
-    support = anchor
-    support_position = origin
+    supports = [anchor]
     compliance, frequency, damping, _ = PROFILES[category]
     if tree:
-        support_position = np.array([0.0, base, 0.0])
-        support = joint(nodes, "Wind Trunk", support_position, anchor, {
-            "axis": [0, 1, 0], "gain": compliance * 0.90, "frequency": frequency,
-            "damping": damping, "flutter": [0, 0, 0, 0],
-        })
-        joint_positions.append(support_position)
+        # The tapered trunk concentrates flex in the thinner upper sections.
+        for section, (rise, share) in enumerate(
+            zip((0.04, 0.28, 0.53, 0.76), (0.04, 0.12, 0.29, 0.55)), start=1
+        ):
+            pivot = np.array([0.0, base + rise * height, 0.0])
+            supports.append(joint(nodes, f"Wind Trunk {section}",
+                                  pivot - joint_positions[-1], supports[-1], {
+                "axis": [0, 1, 0], "gain": compliance * 0.90 * share,
+                "frequency": frequency, "damping": damping, "flutter": [0, 0, 0, 0],
+            }))
+            joint_positions.append(pivot)
+
+    support_levels = np.array([joint_positions[node - 1][1] for node in supports[1:]])
+    transition = height * 0.055
+    support_nodes = np.array(supports)
+
+    def support_weights(y):
+        upper = np.searchsorted(support_levels, y + transition)
+        lower = np.maximum(upper - 1, 0)
+        if not tree:
+            return lower, upper, np.zeros_like(y)
+        hinge_y = support_levels[lower]
+        blend = smoothstep(np.maximum(base, hinge_y - transition), hinge_y + transition, y)
+        return lower, upper, blend
+
+    root_lower, root_upper, root_blend = support_weights(roots[:, 1])
+    branch_supports = support_nodes[np.where(root_blend >= 0.5, root_upper, root_lower)]
 
     # Skin joint indices correspond to node indices minus one (the mesh node).
     branches = []
@@ -109,7 +129,9 @@ def rig(source, category):
             "axis": axis.tolist(), "frequency": float(np.clip(frequency * stiffness * 1.35, 0.55, 3)),
             "damping": damping, "flutter": (response / length * 0.85).tolist(),
         }
-        bottom_joint = joint(nodes, f"Wind Limb {index + 1}", pivot - support_position, support,
+        support = branch_supports[index]
+        bottom_joint = joint(nodes, f"Wind Limb {index + 1}",
+                             pivot - joint_positions[support - 1], int(support),
                              {**motion, "gain": float(gain * 0.72)})
         tip_joint = joint(nodes, f"Wind Tip {index + 1}", middle - pivot, bottom_joint,
                           {**motion, "gain": float(gain * 0.50),
@@ -125,10 +147,13 @@ def rig(source, category):
         progress = (projected - hinges[branch]) / (lengths[branch] - hinges[branch])
         drive = smoothstep(0, 0.31, progress) * root_weight * (assignment >= 0)
         tip_weight = smoothstep(0.46, 0.93, progress) * drive
-        parent_weight = (1 - drive) * root_weight if tree else np.zeros_like(drive)
-        indices = np.column_stack((np.zeros(len(position)), np.full(len(position), support - 1),
+        support_y = np.where(assignment >= 0, roots[branch, 1], position[:, 1])
+        lower, upper, blend = support_weights(support_y)
+        # The fixed base stays pinned, even on ground-level limbs whose root is higher.
+        blend *= root_weight * (upper != lower)
+        indices = np.column_stack((support_nodes[lower] - 1, support_nodes[upper] - 1,
                                    branch_joints[branch]))
-        weights = np.column_stack((1 - drive - parent_weight, parent_weight,
+        weights = np.column_stack(((1 - drive) * (1 - blend), (1 - drive) * blend,
                                    drive - tip_weight, tip_weight))
         indices[weights == 0] = 0
         attrs = primitive["attributes"]

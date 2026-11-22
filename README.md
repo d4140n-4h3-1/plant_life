@@ -25,11 +25,13 @@ python assets/tools/bake_plant_wind.py
 
 ### Directional wind rigs
 
-Every standalone plant has a companion `<plant>-rigged.glb` beside its baked GLB. The rigs start in the rest pose and expose two bend joints per limb. Tree branches inherit trunk motion, and the grass seed heads follow their stalks. The [rig files](assets/) can be posed in Blender or driven at runtime.
+Every standalone plant has a companion `<plant>-rigged.glb` beside its baked GLB. The rigs start in the rest pose and expose two bend joints per limb. Tree trunks flex progressively more toward the crown, and branches inherit motion at their attachment height. Grass seed heads follow their stalks. The [rig files](assets/) can be posed in Blender or driven at runtime.
 
 The directional previews use the runtime rig and show wind blowing right, reversing left, and dropping to calm.
 
 [Meadow foxtail](assets/grasses/meadow-foxtail/renders/directional-wind.gif) · [Sheep fescue](assets/grasses/sheep-fescue/renders/directional-wind.gif) · [Tufted hairgrass](assets/grasses/tufted-hairgrass/renders/directional-wind.gif) · [Wood melick](assets/grasses/wood-melick/renders/directional-wind.gif) · [Pine](assets/conifers/pine/renders/directional-wind.gif) · [Bracken](assets/ferns/bracken/renders/directional-wind.gif)
+
+Cycles previews of the same wind reversal are available for [pine](assets/conifers/pine/renders/directional-wind-cycles.gif) and [wood melick](assets/grasses/wood-melick/renders/directional-wind-cycles.gif).
 
 With Three.js, load the rigged GLB using `GLTFLoader`, then add its scene to your scene and update its controller each frame. Pass a plant-local XZ vector pointing downwind. Its length controls strength, from zero for calm air to one for the reference wind. A wind change accelerates the limbs toward the new direction, and setting the vector to zero lets them settle.
 
