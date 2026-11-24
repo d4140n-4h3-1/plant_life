@@ -19,7 +19,7 @@ Enable the light from `KHR_lights_punctual` in a GLB importer. A custom renderer
 
 ## Build
 
-Use Blender 4.3 from the repository root. ImageMagick 7 is required to encode the GIF.
+Use Blender 4.3 or later (tested with 5.2) from the repository root. ImageMagick 7 is required to encode the GIF.
 
 ```sh
 blender --background --python-exit-code 1 \

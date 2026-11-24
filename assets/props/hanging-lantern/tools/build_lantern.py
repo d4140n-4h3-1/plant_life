@@ -149,6 +149,18 @@ def point_at(obj,target):
     obj.rotation_euler=(Vector(target)-obj.location).to_track_quat("-Z","Y").to_euler()
 
 
+def action_curves(obj):
+    """Return the F-curves of the object's action in Blender 4.3 and in Blender 5."""
+    animation=obj.animation_data
+    slot=getattr(animation,"action_slot",None)
+    if slot is not None:
+        from bpy_extras.anim_utils import action_get_channelbag_for_slot
+        channelbag=action_get_channelbag_for_slot(animation.action,slot)
+        if channelbag is not None:
+            return channelbag.fcurves
+    return animation.action.fcurves
+
+
 def animate(pivot):
     pivot.rotation_mode="QUATERNION"
     for step in range(25):
@@ -160,7 +172,7 @@ def animate(pivot):
         pivot.keyframe_insert(data_path="rotation_quaternion",frame=step*4,group="Swing")
     action=pivot.animation_data.action
     action.name="Lantern Swing"
-    for curve in action.fcurves:
+    for curve in action_curves(pivot):
         for key in curve.keyframe_points:
             key.interpolation="LINEAR"
         curve.modifiers.new(type="CYCLES")

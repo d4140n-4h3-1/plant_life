@@ -23,7 +23,7 @@ Loop **Lantern Walk** in the combined GLB. The clip is in place and includes two
 
 ## Build
 
-Use Blender 4.3 from the repository root. ImageMagick 7 encodes the walk GIF. The script shares modeling helpers with the hanging lantern generator.
+Use Blender 4.3 or later (tested with 5.2) from the repository root. ImageMagick 7 encodes the walk GIF. The script shares modeling helpers with the hanging lantern generator.
 
 ```sh
 blender --background --python-exit-code 1 \
