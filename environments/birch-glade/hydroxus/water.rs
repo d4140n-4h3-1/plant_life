@@ -54,6 +54,13 @@ impl FlowingWater {
         })
     }
 
+    /// Set ripple amplitude and foam for quiet ponds or slow spring pools.
+    pub fn set_surface_activity(&self, waves: f32, foam: f32) {
+        let mut material = self.material.data_ref();
+        material.set_property("waveStrength", waves.clamp(0.0, 1.0));
+        material.set_property("foamStrength", foam.clamp(0.0, 1.0));
+    }
+
     /// Set the refracted contribution from zero to one.
     /// Requires the Hydroxus forward scene-color patch.
     pub fn set_refraction_strength(&self, strength: f32) {

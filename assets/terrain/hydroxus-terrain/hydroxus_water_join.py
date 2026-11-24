@@ -72,7 +72,7 @@ def join_water_channels(tributary, receiving, blend_distance=0.65):
 
     seam = []
 
-    def conform(point):
+    def conform(point, *, seam_only=False):
         nearest = None
         distance = blend_distance
         for a, b in banks:
@@ -85,20 +85,27 @@ def join_water_channels(tributary, receiving, blend_distance=0.65):
             if separation < distance:
                 nearest, distance = candidate, separation
         result = point.copy()
-        if nearest is not None:
+        if nearest is None:
+            return result
+        if seam_only:
+            if distance <= 2.0e-5:
+                result.z = nearest.z
+                seam.append(result)
+        else:
             weight = 1.0 - distance / blend_distance
             result.z += (nearest.z - result.z) * weight * weight * (3.0 - 2.0 * weight)
-        if distance <= 2.0e-5:
-            seam.append(result)
         return result
 
     vertices, texcoords, directions, faces = [], [], [], []
     vertex_indices = {}
     transform = tributary.matrix_world
     inverse = transform.inverted()
+    # Feather original vertices before clipping so any split edge keeps the
+    # same interpolated height on both sides. Only the receiving edge is snapped.
+    conformed = [conform(transform @ vertex.co) for vertex in source.vertices]
     for triangle in source.loop_triangles:
         polygon = [
-            (transform @ source.vertices[source.loops[li].vertex_index].co,
+            (conformed[source.loops[li].vertex_index],
              flow_uv.data[li].uv.copy(),
              (flow.data[source.loops[li].vertex_index].vector.copy() if flow else Vector((0, 0, 0))))
             for li in triangle.loops
@@ -121,7 +128,7 @@ def join_water_channels(tributary, receiving, blend_distance=0.65):
                     key = tuple(round(value, 6) for value in (*point.xy, *uv))
                     if key not in vertex_indices:
                         vertex_indices[key] = len(vertices)
-                        vertices.append(inverse @ conform(point))
+                        vertices.append(inverse @ conform(point, seam_only=True))
                         texcoords.append(uv)
                         directions.append(direction)
                     face.append(vertex_indices[key])

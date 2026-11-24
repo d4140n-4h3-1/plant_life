@@ -1,4 +1,4 @@
-bl_info = {"name":"Hydroxus Rivers and Streams","version":(0,2,0),"blender":(5,0,0),"category":"3D View"}
+bl_info = {"name":"Hydroxus Rivers and Streams","version":(0,3,0),"blender":(5,0,0),"category":"3D View"}
 from bisect import bisect_left
 from itertools import accumulate
 import math
@@ -9,7 +9,7 @@ from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 from mathutils.geometry import barycentric_transform
 from mathutils.kdtree import KDTree
-from bpy.props import BoolProperty, FloatProperty, IntProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 
 def downhill(points, adjacency, start, limit):
     route=[start]
@@ -292,14 +292,7 @@ class HX_OT_river(bpy.types.Operator):
             if i: faces.append((2*i-2,2*i,2*i+1,2*i-1))
         water=bpy.data.meshes.new('River Surface'); water.from_pydata(verts,[],faces); water.update()
         river=bpy.data.objects.new('Hydroxus River',water); c.collection.objects.link(river)
-        mat=bpy.data.materials.get('Hydroxus Water') or bpy.data.materials.new('Hydroxus Water')
-        mat.use_nodes=True; bs=mat.node_tree.nodes.get('Principled BSDF')
-        if bs:
-            bs.inputs['Base Color'].default_value=(.025,.13,.15,1)
-            bs.inputs['Roughness'].default_value=.12
-            bs.inputs['Transmission Weight'].default_value=.85
-            bs.inputs['IOR'].default_value=1.333
-        water.materials.append(mat)
+        water.materials.append(water_material())
         flow=water.attributes.new('flow_direction','FLOAT_VECTOR','POINT')
         for i in range(len(path)):
             direction=path[min(i+1,len(path)-1)]-path[max(i-1,0)]
@@ -313,22 +306,175 @@ class HX_OT_river(bpy.types.Operator):
         self.report({'INFO'},f'Created downhill channel with {len(route)} samples; check banks and endpoint')
         return {'FINISHED'}
 
+def water_material():
+    material = bpy.data.materials.get("Hydroxus Water")
+    if material is None:
+        material = bpy.data.materials.new("Hydroxus Water")
+        material.use_nodes = True
+        shader = material.node_tree.nodes.get("Principled BSDF")
+        shader.inputs["Base Color"].default_value = (0.025, 0.13, 0.15, 1.0)
+        shader.inputs["Roughness"].default_value = 0.12
+        shader.inputs["Transmission Weight"].default_value = 0.85
+        shader.inputs["IOR"].default_value = 1.333
+    return material
+
+
+def create_basin(terrain, collection, name, center, radii, depth, seed, *,
+                 level=None, outlet=None, build_bed=True):
+    """Carve a seeded basin, then cover it with a level, irregular water surface."""
+    if min(*radii, depth) <= 0:
+        raise ValueError("Basin radii and depth must be positive")
+    bpy.context.view_layer.update()
+    transform = terrain.matrix_world
+    inverse = transform.inverted()
+    x, y = center
+    rx, ry = radii
+    points = [transform @ vertex.co for vertex in terrain.data.vertices]
+    if not points:
+        raise ValueError("The terrain mesh is empty")
+    origin = max(point.z for point in points) + 1
+    bed = BVHTree.FromObject(terrain, bpy.context.evaluated_depsgraph_get())
+    hit, _, _, _ = bed.ray_cast(inverse @ Vector((x, y, origin)),
+                                inverse.to_3x3() @ Vector((0, 0, -1)))
+    if hit is None:
+        raise ValueError("Place the basin center on the terrain")
+    if level is None:
+        level = (transform @ hit).z - min(depth * 0.24, 0.22)
+
+    rng = Random(seed)
+    first, second = rng.uniform(0, math.tau), rng.uniform(0, math.tau)
+
+    def shoreline(angle):
+        return 1.0 + 0.11 * math.sin(3 * angle + first) + 0.058 * math.cos(5 * angle + second)
+
+    shaped = []
+    for index, point in enumerate(points):
+        dx, dy = (point.x - x) / rx, (point.y - y) / ry
+        angle = math.atan2(dy, dx)
+        radius = math.hypot(dx, dy) / shoreline(angle)
+        if radius >= 1.34:
+            continue
+        # A deep core grades onto a broad, irregular shallow shelf.
+        submerged = min(1.0, max(0.0, 1.0 - radius))
+        core = min(1.0, submerged / 0.72)
+        shelf = min(1.0, submerged / 0.23)
+        target = level - depth * (0.77 * core ** 1.45 + 0.23 * shelf)
+        if radius > 1.0:
+            target = level + min((radius - 1.0) * depth * 1.7, 0.24)
+        feather = min(1.0, (1.34 - radius) / 0.19)
+        if outlet is not None and radius > 0.70 and math.cos(angle - outlet) > 0.87:
+            # Retain the downhill channel at the outlet instead of building a dam.
+            target = min(target, point.z)
+        shaped.append((index, (1.0 - feather) * point.z + feather * target))
+    if len(shaped) < 8:
+        raise ValueError("The terrain needs more vertices within the basin footprint")
+    for index, z in shaped:
+        point = points[index]
+        point.z = z
+        terrain.data.vertices[index].co = inverse @ point
+    terrain.data.update()
+
+    vertices = [(x, y, level)]
+    segments = 72
+    for i in range(segments):
+        angle = math.tau * i / segments
+        radius = shoreline(angle) * 1.13
+        vertices.append((x + rx * radius * math.cos(angle),
+                         y + ry * radius * math.sin(angle), level))
+    faces = [(0, i + 1, (i + 1) % segments + 1) for i in range(segments)]
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(vertices, [], faces)
+    mesh.update()
+    mesh.materials.append(water_material())
+    uv = mesh.uv_layers.new(name="FlowUV")
+    for loop in mesh.loops:
+        px, py, _ = vertices[loop.vertex_index]
+        uv.data[loop.index].uv = (px - x + rx, py - y + ry)
+    water = bpy.data.objects.new(name, mesh)
+    water["water_kind"] = "spring" if outlet is not None else "pond"
+    water["bed_seed"] = str(seed)
+    water["source_terrain"] = terrain.name
+    water["water_level_m"] = level
+    if outlet is not None:
+        radius = shoreline(outlet)
+        water["outlet_blender_world"] = (x + rx * radius * math.cos(outlet),
+                                         y + ry * radius * math.sin(outlet), level)
+    collection.objects.link(water)
+    if build_bed:
+        dress_channel_beds(terrain, (water,), seed, collection)
+    return water
+
+
+class HX_OT_basin(bpy.types.Operator):
+    bl_idname = "hx.basin"
+    bl_label = "Create Pond or Spring at 3D Cursor"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return HX_OT_river.poll(context)
+
+    def execute(self, context):
+        terrain = context.object
+        if terrain.data.users > 1:
+            self.report({'ERROR'}, "Make the terrain mesh single-user first")
+            return {'CANCELLED'}
+        scene = context.scene
+        spring = scene.hxr_basin_kind == "SPRING"
+        try:
+            create_basin(
+                terrain, context.collection, "Hydroxus Spring" if spring else "Hydroxus Pond",
+                scene.cursor.location.xy, (scene.hxr_basin_width, scene.hxr_basin_length),
+                scene.hxr_depth, scene.hxr_bed_seed,
+                outlet=scene.hxr_outlet_angle if spring else None,
+            )
+        except ValueError as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
 class HX_PT_river(bpy.types.Panel):
-    bl_label='Rivers and Streams'; bl_idname='HX_PT_river'; bl_space_type='VIEW_3D'; bl_region_type='UI'; bl_category='Terrain'
+    bl_label='Rivers, Streams and Ponds'; bl_idname='HX_PT_river'; bl_space_type='VIEW_3D'; bl_region_type='UI'; bl_category='Terrain'
     def draw(self,c):
         l=self.layout; s=c.scene
         l.label(text='Place 3D cursor at water source')
         l.prop(s,'hxr_width'); l.prop(s,'hxr_depth'); l.prop(s,'hxr_steps')
         l.prop(s,'hxr_bed_seed')
         l.operator('hx.river')
+        l.separator()
+        l.prop(s, 'hxr_basin_kind')
+        l.prop(s, 'hxr_basin_width')
+        l.prop(s, 'hxr_basin_length')
+        if s.hxr_basin_kind == "SPRING":
+            l.prop(s, 'hxr_outlet_angle')
+        l.operator('hx.basin')
+
+CLASSES = (HX_OT_river, HX_OT_basin, HX_PT_river)
+SCENE_PROPERTIES = (
+    'hxr_width', 'hxr_depth', 'hxr_steps', 'hxr_bed_seed', 'hxr_basin_kind',
+    'hxr_basin_width', 'hxr_basin_length', 'hxr_outlet_angle',
+)
+
 
 def register():
-    bpy.utils.register_class(HX_OT_river); bpy.utils.register_class(HX_PT_river)
+    for cls in CLASSES:
+        bpy.utils.register_class(cls)
+    bpy.types.Scene.hxr_basin_kind = EnumProperty(
+        name="Basin type",
+        items=(("POND", "Pond", "Closed still-water basin"),
+               ("SPRING", "Spring", "Source pool with an open outlet")),
+    )
+    bpy.types.Scene.hxr_basin_width = FloatProperty(name="East–west radius (m)", default=2.6, min=0.1)
+    bpy.types.Scene.hxr_basin_length = FloatProperty(name="North–south radius (m)", default=2.0, min=0.1)
+    bpy.types.Scene.hxr_outlet_angle = FloatProperty(name="Outlet angle from +X", subtype='ANGLE', default=0.0)
     bpy.types.Scene.hxr_width=FloatProperty(name='Channel Half Width (m)',default=2,min=.05,max=1000)
     bpy.types.Scene.hxr_depth=FloatProperty(name='Channel Depth (m)',default=.6,min=.01,max=100)
     bpy.types.Scene.hxr_bed_seed=IntProperty(name='Bed Seed',default=2741,min=0)
     bpy.types.Scene.hxr_steps=IntProperty(name='Maximum Flow Steps',default=2000,min=1,max=100000)
 def unregister():
-    for k in ('hxr_width','hxr_depth','hxr_steps','hxr_bed_seed'): delattr(bpy.types.Scene,k)
-    bpy.utils.unregister_class(HX_PT_river); bpy.utils.unregister_class(HX_OT_river)
+    for name in SCENE_PROPERTIES:
+        delattr(bpy.types.Scene, name)
+    for cls in reversed(CLASSES):
+        bpy.utils.unregister_class(cls)
 if __name__=='__main__': register()

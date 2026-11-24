@@ -166,17 +166,19 @@ def shape_banks(terrain, channels):
     terrain.data.update()
 
 
-def build_waterways(terrain, group, shore_rng):
+def build_waterways(terrain, group, shore_rng, shore_seed):
     bpy.context.view_layer.objects.active = terrain
     terrain.select_set(True)
     bpy.context.view_layer.update()
+    spring_x = -12.25
+    spring_y = stream_y(spring_x)
     hydroxus_rivers.register()
     try:
         river, river_banks = carve_channel(
             terrain, group, "Birch River", (river_x(23), 23), 2.65, 0.83, shore_rng,
         )
         stream, stream_banks = carve_channel(
-            terrain, group, "Fern Stream", (-14, stream_y(-14)), 1.13, 0.48, shore_rng,
+            terrain, group, "Fern Stream", (spring_x, spring_y), 1.13, 0.48, shore_rng,
             join=lambda point: point.x >= river_x(point.y) - 0.84,
         )
         river_surface = BVHTree.FromObject(river, bpy.context.evaluated_depsgraph_get())
@@ -216,8 +218,21 @@ def build_waterways(terrain, group, shore_rng):
         hydroxus_rivers.set_water_uv(water)
     banks = (river_banks, stream_banks)
     shape_banks(terrain, banks)
+    outlet_section = min(stream_banks, key=lambda section: abs(section[0].x - (spring_x + 1.25)))
+    spring = hydroxus_rivers.create_basin(
+        terrain, group, "Alder Spring", (spring_x, spring_y), (1.45, 1.05),
+        0.43, shore_seed + 61, level=outlet_section[0].z + 0.012, outlet=0, build_bed=False,
+    )
+    pond = hydroxus_rivers.create_basin(
+        terrain, group, "Heather Pond", (6.95, 10.15), (2.42, 1.72),
+        0.84, shore_seed + 109, build_bed=False,
+    )
+    spring_join = join_water_channels(stream, spring)
+    stream["spring_join_center_blender_world"] = tuple(spring_join)
     join_water_channels(stream, river)
-    return (river, stream), banks
+    spring["feeds"] = stream.name
+    stream["water_source"] = spring.name
+    return (river, stream, spring, pond), banks
 
 
 def tint_shore(terrain, shore_rng):
@@ -312,7 +327,7 @@ def build(shore_seed, output, render=False):
         scene.collection.children.link(groups[name])
     woodland.ground(groups["Terrain"])
     terrain, = groups["Terrain"].objects
-    waterways, shorelines = build_waterways(terrain, groups["Waterways"], shore_rng)
+    waterways, shorelines = build_waterways(terrain, groups["Waterways"], shore_rng, shore_seed)
     tint_shore(terrain, shore_rng)
     hydroxus_rivers.dress_channel_beds(terrain, waterways, shore_seed, groups["Terrain"])
     for water in waterways:
@@ -460,6 +475,24 @@ def build(shore_seed, output, render=False):
                     species = "Hard fern" if shore_rng.random() < 0.40 else "Wood melick"
                     place(species, "Understory", point.x, point.y, shore_rng.uniform(0.42, 0.86))
 
+    # Wet margins favor clusters of grass and ferns with scattered exposed stones.
+    for water in waterways[2:]:
+        center = water.data.vertices[0].co
+        bank_rng = Random(int(water["bed_seed"]))
+        for vertex in list(water.data.vertices)[1::2]:
+            offset = vertex.co - center
+            point = center + offset * bank_rng.uniform(0.86, 1.14)
+            if bank_rng.random() < 0.30:
+                place("Granite cobble", "Granite", point.x, point.y,
+                      bank_rng.uniform(0.26, 0.69), allow_water=True)
+            else:
+                species = bank_rng.choice(("Hard fern", "Wood melick", "Wood melick", "Common heather"))
+                place(species, "Understory", point.x, point.y, bank_rng.uniform(0.64, 1.08))
+    spring = waterways[2].data.vertices[0].co
+    for dx, dy, scale in ((-1.07, -0.35, 0.82), (-0.98, 0.42, 0.67), (-0.64, 0.63, 0.52)):
+        place("Granite boulder", "Granite", spring.x + dx, spring.y + dy, scale,
+              0.07, allow_water=True)
+
     for y in (-7.1, -0.5, 8.8, 12.6):
         place("Granite boulder", "Granite", river_x(y) + 0.74, y, rng.uniform(0.65, 0.98),
               0.02, allow_water=True)
@@ -478,6 +511,17 @@ def build(shore_seed, output, render=False):
     overview.location = (3, -15, 28)
     woodland.point_at(overview, (0, 3, 0))
     overview.data.ortho_scale = 32
+    for water, offset, lens in (
+        (waterways[2], (3.1, -2.7, 2.2), 31),
+        (waterways[3], (-3.2, -4.1, 2.75), 35),
+    ):
+        center = water.data.vertices[0].co
+        camera_data = bpy.data.cameras.new(f"{water.name} view")
+        camera_data.lens = lens
+        camera = bpy.data.objects.new(camera_data.name, camera_data)
+        scene.collection.objects.link(camera)
+        camera.location = center + Vector(offset)
+        woodland.point_at(camera, center)
     scene.cycles.use_denoising = False
     scene.cycles.samples = 28
     scene.cycles.adaptive_threshold = 0.045

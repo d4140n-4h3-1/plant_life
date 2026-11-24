@@ -18,6 +18,7 @@
                 (name: "flowPhase", kind: Float(value: 0.0)),
                 (name: "sunDirection", kind: Vector3(value: (-0.4234, 0.7460, -0.5141))),
                 (name: "foamStrength", kind: Float(value: 0.72)),
+                (name: "waveStrength", kind: Float(value: 1.0)),
                 (name: "sceneColorWeight", kind: Float(value: 0.0)),
                 (name: "confluencePhase", kind: Float(value: 0.0)),
                 (name: "confluences", kind: Vector4Array(value: [], max_len: 8)),
@@ -133,7 +134,7 @@
                                + sin(grain) * (0.003 * grainWeight);
 
                     // Use surface derivatives to tilt the reflection along the curved ribbon.
-                    let bumped = worldPosition + vec3f(0.0, 1.0, 0.0) * wave;
+                    let bumped = worldPosition + vec3f(0.0, 1.0, 0.0) * (wave * properties.waveStrength);
                     let gradient = cross(dpdx(bumped), dpdy(bumped));
                     let upward = vec3f(0.0, 1.0, 0.0);
                     let tangentNormal = gradient * sign(gradient.y) / max(length(gradient), 0.0000001);

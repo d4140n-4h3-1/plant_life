@@ -28,6 +28,30 @@ the water toward the sun. Supply the directional light's world-space +Y axis
 when using Wilderness's convention. The material expects opaque terrain and rocks
 to write depth before the forward water pass, and uses perspective camera depth.
 
+## Ponds and springs
+
+In the Blender **Rivers, Streams and Ponds** panel, choose **Pond** or **Spring**,
+set the two radii and the shared depth and bed seed, then run **Create Pond or
+Spring at 3D Cursor**. Select a terrain mesh dense enough to resolve the shallow
+shelf before running the operator. Spring mode leaves an outlet in the rim and
+records its location. Connect a downstream trace at that outlet to make a
+continuous surface.
+
+Birch Glade includes **Heather Pond**, a closed woodland basin, and
+**Alder Spring**, which feeds Fern Stream. Both use level water surfaces and
+share the scene's textured gravel mesh with the channels. The Blender file
+includes a camera for each basin.
+
+In Hydroxus, use a low phase rate for each still-water surface and reduce its
+ripple height and foam:
+
+```rust
+let pond = FlowingWater::attach(pond_mesh, WaterBackend::Wgpu, 0.035)?;
+pond.set_surface_activity(0.30, 0.0);
+let spring = FlowingWater::attach(spring_mesh, WaterBackend::Wgpu, 0.10)?;
+spring.set_surface_activity(0.52, 0.16);
+```
+
 ## Refraction
 
 To refract the lit riverbed and submerged rocks, apply the
@@ -53,6 +77,8 @@ After attaching the materials, enable refraction on both waterways:
 ```rust
 river.set_refraction_strength(1.0);
 stream.set_refraction_strength(1.0);
+pond.set_refraction_strength(1.0);
+spring.set_refraction_strength(1.0);
 ```
 
 The strength defaults to zero for compatibility with stock Hydroxus. The
@@ -86,13 +112,15 @@ so the ripples and foam transition to one shared pattern at the seam.
 use fyrox::core::algebra::Vector4;
 
 // Birch Glade at its original import transform. xyz is the center, w the radius.
-let junction = Vector4::new(-6.540, 0.805, -5.314, 2.2);
-river.set_confluences(&[junction]);
-stream.set_confluences(&[junction]);
+let river_join = Vector4::new(-6.537, 0.809, -5.368, 2.2);
+let spring_join = Vector4::new(-11.065, 1.815, -5.628, 3.0);
+river.set_confluences(&[river_join]);
+stream.set_confluences(&[river_join, spring_join]);
+spring.set_confluences(&[spring_join]);
 ```
 
-Each update, call `set_confluence_time(context.elapsed_time)` on both controllers,
-in addition to their regular `update(context.dt)` calls. If you move the imported
+Each update, call `set_confluence_time(context.elapsed_time)` on the three connected
+controllers, in addition to their regular `update(context.dt)` calls. If you move the imported
 scene, transform the junction center with it. A receiving water surface can use
 up to eight junctions.
 
@@ -132,7 +160,8 @@ blender -b --python-exit-code 1 \
   -- --shore-seed 591038123 --output-dir /tmp/birch-glade-variant
 ```
 
-Use the variant's `join_center_local` when setting its shader confluence.
+Use the variant's `join_center_local` and `spring_join_center_blender_world`
+when setting its shader confluences.
 The seed is recorded in each water node's GLB extras as `shore_seed`.
 
 The forward renderer and scene-depth binding were checked against Wilderness's
