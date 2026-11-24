@@ -18,6 +18,28 @@ def downhill(points, adjacency, start, limit):
         route.append(max(candidates)[1])
     return route
 
+def set_water_uv(water):
+    """Write downstream and cross-channel distances in meters to TEXCOORD_0."""
+    mesh = water.data
+    uv = mesh.uv_layers.get("FlowUV") or mesh.uv_layers.new(name="FlowUV")
+    mesh.uv_layers.active = uv
+    uv.active_render = True
+    distance = 0.0
+    previous = None
+    coordinates = []
+    for i in range(0, len(mesh.vertices), 2):
+        left, right = mesh.vertices[i].co, mesh.vertices[i + 1].co
+        center = (left + right) / 2
+        if previous is not None:
+            distance += (center - previous).length
+        previous = center
+        width = (right - left).length
+        coordinates.extend(((distance, 0.0), (distance, width)))
+    for loop in mesh.loops:
+        uv.data[loop.index].uv = coordinates[loop.vertex_index]
+    mesh.update()
+
+
 class HX_OT_river(bpy.types.Operator):
     bl_idname="hx.river"; bl_label="Trace River from 3D Cursor"; bl_options={'REGISTER','UNDO'}
     @classmethod
@@ -83,6 +105,7 @@ class HX_OT_river(bpy.types.Operator):
             direction=path[min(i+1,len(path)-1)]-path[max(i-1,0)]
             direction.normalize()
             for j in (2*i,2*i+1): flow.data[j].vector=direction
+        set_water_uv(river)
         river['source_terrain']=obj.name
         river['termination']='step_limit' if len(route)==s.hxr_steps+1 else 'local_minimum_or_boundary'
         self.report({'INFO'},f'Created downhill channel with {len(route)} samples; check banks and endpoint')
