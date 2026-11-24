@@ -1,0 +1,168 @@
+diff --git a/editor/src/highlight.rs b/editor/src/highlight.rs
+index 69af83b..88cae94 100644
+--- a/editor/src/highlight.rs
++++ b/editor/src/highlight.rs
+@@ -168,4 +168,5 @@ impl SceneRenderPass for HighlightRenderPass {
+                     ambient_light: Default::default(),
+                     scene_depth: Some(ctx.depth_texture),
++                    scene_color: None,
+                     viewport: ctx.observer.viewport,
+                     uniform_memory_allocator: ctx.uniform_memory_allocator,
+diff --git a/fyrox-impl/src/renderer/bundle.rs b/fyrox-impl/src/renderer/bundle.rs
+index 89d1a03..f6deb80 100644
+--- a/fyrox-impl/src/renderer/bundle.rs
++++ b/fyrox-impl/src/renderer/bundle.rs
+@@ -144,4 +144,5 @@ pub struct BundleRenderContext<'a> {
+     // renderer to have access to depth buffer that is available from G-Buffer.
+     pub scene_depth: Option<&'a GpuTexture>,
++    pub scene_color: Option<&'a GpuTexture>,
+     pub renderer_resources: &'a RendererResources,
+ }
+@@ -612,4 +613,13 @@ impl RenderDataBundle {
+                     ));
+                 }
++                "fyrox_sceneColor" => {
++                    material_bindings.push(ResourceBinding::texture(
++                        render_context
++                            .scene_color
++                            .unwrap_or(&render_context.renderer_resources.black_dummy),
++                        &render_context.renderer_resources.linear_clamp_sampler,
++                        resource_definition.binding,
++                    ));
++                }
+                 "fyrox_cameraData" => {
+                     material_bindings.push(
+diff --git a/fyrox-impl/src/renderer/gbuffer.rs b/fyrox-impl/src/renderer/gbuffer.rs
+index 8872fed..a6b9a70 100644
+--- a/fyrox-impl/src/renderer/gbuffer.rs
++++ b/fyrox-impl/src/renderer/gbuffer.rs
+@@ -253,4 +253,5 @@ impl GBuffer {
+                 ambient_light: Color::WHITE, // TODO
+                 scene_depth: None,           // TODO. Add z-pre-pass.
++                scene_color: None,
+             },
+         )?;
+diff --git a/fyrox-impl/src/renderer/mod.rs b/fyrox-impl/src/renderer/mod.rs
+index 916adaf..9336c69 100644
+--- a/fyrox-impl/src/renderer/mod.rs
++++ b/fyrox-impl/src/renderer/mod.rs
+@@ -221,4 +221,7 @@ pub struct RenderDataContainer {
+     pub hdr_scene_framebuffer: GpuFrameBuffer,
+
++    // Allocated on demand for forward materials that sample the opaque scene.
++    opaque_color_framebuffer: Option<GpuFrameBuffer>,
++
+     /// Final frame of the container. Tone mapped + gamma corrected.
+     pub ldr_scene_framebuffer: GpuFrameBuffer,
+@@ -325,4 +328,5 @@ impl RenderDataContainer {
+             hdr_renderer: HighDynamicRangeRenderer::new(width, height, server)?,
+             hdr_scene_framebuffer,
++            opaque_color_framebuffer: None,
+             ldr_scene_framebuffer,
+             ldr_temp_framebuffer: [
+@@ -351,4 +355,28 @@ impl RenderDataContainer {
+     }
+
++    fn capture_opaque_color(
++        snapshot: &mut Option<GpuFrameBuffer>,
++        scene: &GpuFrameBuffer,
++        width: i32,
++        height: i32,
++        server: &dyn GraphicsServer,
++    ) -> Result<GpuTexture, FrameworkError> {
++        if snapshot.is_none() {
++            let color = server.create_2d_render_target(
++                "ObserverOpaqueColor",
++                PixelKind::RGB10A2,
++                width as usize,
++                height as usize,
++            )?;
++            *snapshot =
++                Some(server.create_frame_buffer(None, vec![Attachment::color(color)])?);
++        }
++        let snapshot = snapshot.as_ref().unwrap();
++        scene.blit_to(
++            snapshot, 0, 0, width, height, 0, 0, width, height, true, false, false,
++        );
++        Ok(snapshot.color_attachments()[0].texture.clone())
++    }
++
+     /// Returns high-dynamic range frame buffer texture.
+     pub fn hdr_scene_frame_texture(&self) -> &GpuTexture {
+@@ -1317,4 +1345,40 @@ impl Renderer {
+         {
+             let _debug_scope = server.begin_scope("ForwardRendering");
++            let needs_opaque_color = bundle_storage.bundles.iter().any(|bundle| {
++                if bundle.render_path != RenderPath::Forward {
++                    return false;
++                }
++                let material = bundle.material.state();
++                let Some(material) = material.data_ref() else {
++                    return false;
++                };
++                let shader = material.shader().state();
++                let requests_snapshot = shader.data_ref().is_some_and(|shader| {
++                    shader
++                        .definition
++                        .resources
++                        .iter()
++                        .any(|resource| resource.name.as_str() == "fyrox_sceneColor")
++                });
++                // A material that samples scene color may explicitly opt out of a capture.
++                requests_snapshot
++                    && material
++                        .property_group_ref("properties")
++                        .and_then(|properties| properties.property_ref("sceneColorWeight"))
++                        .and_then(|weight| weight.as_float())
++                        .unwrap_or(1.0)
++                        > 0.0
++            });
++            let opaque_color = if needs_opaque_color {
++                Some(RenderDataContainer::capture_opaque_color(
++                    &mut render_data.opaque_color_framebuffer,
++                    &render_data.hdr_scene_framebuffer,
++                    render_data.gbuffer.width,
++                    render_data.gbuffer.height,
++                    server,
++                )?)
++            } else {
++                None
++            };
+
+             render_data.statistics += bundle_storage.render_to_frame_buffer(
+@@ -1336,4 +1400,5 @@ impl Renderer {
+                     ambient_light: scene.rendering_options.ambient_lighting_color,
+                     scene_depth: Some(depth),
++                    scene_color: opaque_color.as_ref(),
+                 },
+             )?;
+diff --git a/fyrox-impl/src/renderer/shadow/csm.rs b/fyrox-impl/src/renderer/shadow/csm.rs
+index 458840a..f09f7d7 100644
+--- a/fyrox-impl/src/renderer/shadow/csm.rs
++++ b/fyrox-impl/src/renderer/shadow/csm.rs
+@@ -296,4 +296,5 @@ impl CsmRenderer {
+                     ambient_light: Color::WHITE, // TODO
+                     scene_depth: None,
++                    scene_color: None,
+                 },
+             )?;
+diff --git a/fyrox-impl/src/renderer/shadow/point.rs b/fyrox-impl/src/renderer/shadow/point.rs
+index 3a58778..df89539 100644
+--- a/fyrox-impl/src/renderer/shadow/point.rs
++++ b/fyrox-impl/src/renderer/shadow/point.rs
+@@ -251,4 +251,5 @@ impl PointShadowMapRenderer {
+                     ambient_light: Color::WHITE, // TODO
+                     scene_depth: None,
++                    scene_color: None,
+                 },
+             )?;
+diff --git a/fyrox-impl/src/renderer/shadow/spot.rs b/fyrox-impl/src/renderer/shadow/spot.rs
+index 389775a..3801d88 100644
+--- a/fyrox-impl/src/renderer/shadow/spot.rs
++++ b/fyrox-impl/src/renderer/shadow/spot.rs
+@@ -178,4 +178,5 @@ impl SpotShadowMapRenderer {
+                 ambient_light: Color::WHITE, // TODO
+                 scene_depth: None,
++                scene_color: None,
+             },
+         )?;

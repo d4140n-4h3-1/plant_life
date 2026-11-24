@@ -3,6 +3,11 @@
 
     resources: [
         (
+            name: "fyrox_sceneColor",
+            kind: Texture(kind: Sampler2D, fallback: Black),
+            binding: 1
+        ),
+        (
             name: "fyrox_sceneDepth",
             kind: Texture(kind: DepthSampler2D, fallback: White),
             binding: 0
@@ -11,8 +16,9 @@
             name: "properties",
             kind: PropertyGroup([
                 (name: "flowPhase", kind: Float(value: 0.0)),
-                (name: "sunDirection", kind: Vector3(value: (-0.42, 0.74, -0.51))),
+                (name: "sunDirection", kind: Vector3(value: (-0.4234, 0.7460, -0.5141))),
                 (name: "foamStrength", kind: Float(value: 0.72)),
+                (name: "sceneColorWeight", kind: Float(value: 0.0)),
                 (name: "confluencePhase", kind: Float(value: 0.0)),
                 (name: "confluences", kind: Vector4Array(value: [], max_len: 8)),
             ]),
@@ -103,9 +109,10 @@
                     float sceneDepth = texelFetch(fyrox_sceneDepth, ivec2(fragCoord.xy), 0).r;
                     float fragmentDepth = linearDepth(fragCoord.z);
                     vec3 eye = fyrox_cameraData.position - worldPosition;
-                    vec3 viewDir = normalize(eye);
+                    float eyeDistance = max(length(eye), 0.001);
+                    vec3 viewDir = eye / eyeDistance;
                     float pathLength = clamp((linearDepth(sceneDepth) - fragmentDepth)
-                                           * length(eye) / max(fragmentDepth, 0.001), 0.0, 10.0);
+                                           * eyeDistance / max(fragmentDepth, 0.001), 0.0, 10.0);
                     float bedDepth = pathLength * clamp(abs(viewDir.y), 0.12, 1.0);
                     float contact = smoothstep(0.0, 0.043, pathLength);
 
@@ -131,52 +138,118 @@
                     vec3 tangentNormal = gradient * sign(gradient.y) / max(length(gradient), 0.0000001);
                     vec3 channelNormal = normalize(mix(upward, tangentNormal, 0.82));
 
-                    // Both surfaces use the same world-space waves in each junction.
+                    if (contact < 0.001) {
+                        FragColor = vec4(0.0);
+                        return;
+                    }
+
+                    // Evaluate shared waves only at active junctions. Use squared distance.
                     float junctionWeight = 0.0;
                     for (int i = 0; i < 8; ++i) {
                         vec4 junction = properties.confluences[i];
-                        float radius = max(junction.w, 0.001);
-                        float distanceToJoin = distance(worldPosition.xz, junction.xz);
-                        junctionWeight = max(junctionWeight, step(0.001, junction.w)
-                            * (1.0 - smoothstep(radius * 0.35, radius, distanceToJoin)));
+                        if (junction.w > 0.001) {
+                            vec2 delta = worldPosition.xz - junction.xz;
+                            float radius2 = junction.w * junction.w;
+                            junctionWeight = max(junctionWeight,
+                                1.0 - smoothstep(radius2 * 0.1225, radius2, dot(delta, delta)));
+                        }
                     }
-                    float sharedPhase = properties.confluencePhase * 6.2831853;
-                    float commonA = dot(worldPosition.xz, vec2(5.1, -6.4)) - 2.0 * sharedPhase;
-                    float commonB = dot(worldPosition.xz, vec2(9.2, 4.8)) - 3.0 * sharedPhase;
-                    vec2 slope = cos(commonA) * vec2(0.075, -0.094)
-                               + cos(commonB) * vec2(0.048, 0.025);
-                    vec3 junctionNormal = normalize(vec3(-slope.x, 1.0, -slope.y));
-                    vec3 normal = normalize(mix(channelNormal, junctionNormal, junctionWeight));
-                    float facing = clamp(dot(normal, viewDir), 0.0, 1.0);
-                    float fresnel = 0.0204 + 0.9796 * pow(1.0 - facing, 5.0);
+                    vec3 normal = channelNormal;
+                    float commonA = 0.0;
+                    float commonB = 0.0;
+                    if (junctionWeight > 0.0) {
+                        float sharedPhase = properties.confluencePhase * 6.2831853;
+                        commonA = dot(worldPosition.xz, vec2(5.1, -6.4)) - 2.0 * sharedPhase;
+                        commonB = dot(worldPosition.xz, vec2(9.2, 4.8)) - 3.0 * sharedPhase;
+                        vec2 slope = cos(commonA) * vec2(0.075, -0.094)
+                                   + cos(commonB) * vec2(0.048, 0.025);
+                        vec3 junctionNormal = normalize(vec3(-slope.x, 1.0, -slope.y));
+                        normal = normalize(mix(channelNormal, junctionNormal, junctionWeight));
+                    }
+                    float grazing = 1.0 - clamp(dot(normal, viewDir), 0.0, 1.0);
+                    float grazing2 = grazing * grazing;
+                    float fresnel = 0.0204 + 0.9796 * grazing2 * grazing2 * grazing;
                     vec3 reflected = reflect(-viewDir, normal);
 
                     // Analytic sky reflection and a broad, broken highlight from the main light.
                     float skyHeight = smoothstep(-0.08, 0.58, reflected.y);
                     vec3 sky = mix(vec3(0.19, 0.23, 0.24), vec3(0.32, 0.42, 0.55), skyHeight);
-                    vec3 sun = normalize(properties.sunDirection);
+                    // FlowingWater ships a unit direction for the sun.
+                    vec3 sun = properties.sunDirection;
+                    float daylight = smoothstep(-0.12, 0.22, sun.y);
                     float highlight = pow(clamp(dot(reflected, sun), 0.0, 1.0), 105.0);
                     highlight *= smoothstep(0.015, 0.16, sun.y)
                                * mix(0.45 + 0.55 * broadWeight, 1.0, junctionWeight);
-                    vec3 reflection = sky * fresnel + vec3(1.0, 0.88, 0.67) * highlight * 0.37;
+                    vec3 reflection = sky * fresnel * mix(0.09, 1.0, daylight) + vec3(1.0, 0.88, 0.67) * highlight * 0.37;
 
                     float absorption = 1.0 - exp(-1.18 * pathLength);
-                    vec3 body = mix(vec3(0.088, 0.103, 0.060), vec3(0.019, 0.062, 0.054), absorption);
+                    vec3 body = mix(vec3(0.088, 0.103, 0.060), vec3(0.019, 0.062, 0.054), absorption) * mix(0.22, 1.0, daylight);
 
-                    // Leave most of the shoreline clear. Foam collects in broken streaks at contacts.
-                    float channelPatches = 0.53 + 0.25 * sin(roll * 2.0 + 0.55 * sin(ripple))
-                                          + 0.19 * sin(grain - roll);
-                    float patches = mix(channelPatches, 0.52 + 0.22 * sin(commonA) + 0.14 * sin(commonB), junctionWeight);
-                    float foamBand = smoothstep(0.012, 0.052, bedDepth)
+                    // Foam is a shallow contact effect. Keep the deep channel clear.
+                    float foam = 0.0;
+                    if (bedDepth > 0.012 && bedDepth < 0.24 && properties.foamStrength > 0.0) {
+                        float channelPatches = 0.53 + 0.25 * sin(roll * 2.0 + 0.55 * sin(ripple))
+                                              + 0.19 * sin(grain - roll);
+                        float patches = channelPatches;
+                        if (junctionWeight > 0.0) {
+                            patches = mix(channelPatches,
+                                0.52 + 0.22 * sin(commonA) + 0.14 * sin(commonB), junctionWeight);
+                        }
+                        float band = smoothstep(0.012, 0.052, bedDepth)
                                    * (1.0 - smoothstep(0.065, 0.24, bedDepth));
-                    float foam = foamBand * smoothstep(0.57, 0.91, patches)
-                               * mix(0.28 + 0.72 * fineWeight, 0.65, junctionWeight) * properties.foamStrength;
+                        foam = band * smoothstep(0.57, 0.91, patches)
+                             * mix(0.28 + 0.72 * fineWeight, 0.65, junctionWeight) * properties.foamStrength;
+                    }
 
                     // Convert premultiplied terms to the forward pass's straight-alpha blend.
                     float bodyWeight = absorption * (1.0 - fresnel);
                     float alpha = clamp((bodyWeight + fresnel + 0.23 * highlight) * contact, 0.0, 1.0);
                     vec3 premultiplied = (body * bodyWeight + reflection) * contact;
-                    premultiplied = mix(premultiplied, vec3(0.68, 0.76, 0.68), foam);
+                    // Fade refraction before distant or deep water would hide the riverbed.
+                    float refraction = clamp(properties.sceneColorWeight, 0.0, 1.0)
+                        * smoothstep(0.02, 0.10, pathLength)
+                        * (1.0 - smoothstep(1.6, 3.6, pathLength))
+                        * (1.0 - smoothstep(28.0, 58.0, eyeDistance))
+                        * (1.0 - smoothstep(0.65, 0.95, fresnel));
+                    if (refraction > 0.0) {
+                        vec2 size = vec2(textureSize(fyrox_sceneColor, 0));
+                        vec2 screen = fragCoord.xy / size;
+                        vec3 incident = -viewDir;
+                        vec3 transmitted = refract(incident, normal, 1.0 / 1.333);
+                        vec4 surfaceClip = fyrox_cameraData.viewProjectionMatrix * vec4(worldPosition, 1.0);
+                        float travel = min(pathLength, 2.4);
+                        vec4 targetClip = fyrox_cameraData.viewProjectionMatrix
+                            * vec4(worldPosition + transmitted * travel, 1.0);
+                        vec2 sampleUv = screen;
+                        if (targetClip.w > 0.001 && surfaceClip.w > 0.001) {
+                            vec2 projectionOffset = (targetClip.xy / targetClip.w
+                                - surfaceClip.xy / surfaceClip.w) * vec2(0.5, 0.5);
+                            vec2 offset = clamp(projectionOffset, vec2(-0.04), vec2(0.04));
+                            vec2 candidate = screen + offset * smoothstep(0.04, 0.32, pathLength);
+                            if (all(greaterThan(candidate, vec2(0.001))) && all(lessThan(candidate, vec2(0.999)))) {
+                                float candidateDepth = texelFetch(fyrox_sceneDepth, ivec2(candidate * size), 0).r;
+                                float clearance = linearDepth(candidateDepth) - fragmentDepth;
+                                sampleUv = mix(screen, candidate, smoothstep(0.025, 0.14, clearance));
+                            }
+                        }
+                        vec3 bed = textureLod(fyrox_sceneColor, sampleUv, 0.0).rgb;
+                        // Modulate the existing bed sample with faint, moving caustics.
+                        float causticWeight = daylight * fineWeight
+                            * smoothstep(0.05, 0.13, bedDepth) * (1.0 - smoothstep(0.25, 0.65, bedDepth));
+                        if (causticWeight > 0.0) {
+                            float channelCrest = 0.5 + 0.5 * sin(ripple + 0.6 * sin(roll));
+                            float sharedCrest = 0.5 + 0.5 * sin(commonA + 0.6 * sin(commonB));
+                            float crest = mix(channelCrest, sharedCrest, junctionWeight);
+                            float ridge = crest * crest;
+                            bed *= 1.0 + causticWeight * (0.24 * ridge * ridge - 0.047);
+                        }
+                        vec3 transmission = exp(-vec3(0.88, 0.38, 0.30) * pathLength);
+                        vec3 inScatter = body * (vec3(1.0) - transmission);
+                        vec3 throughWater = (bed * transmission + inScatter) * (1.0 - fresnel);
+                        premultiplied = mix(premultiplied, (throughWater + reflection) * contact, refraction);
+                        alpha = mix(alpha, contact, refraction);
+                    }
+                    premultiplied = mix(premultiplied, vec3(0.68, 0.76, 0.68) * mix(0.16, 1.0, daylight), foam);
                     alpha = mix(alpha, 1.0, foam);
                     FragColor = vec4(premultiplied / max(alpha, 0.001), alpha);
                 }

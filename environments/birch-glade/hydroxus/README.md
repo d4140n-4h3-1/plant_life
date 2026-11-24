@@ -28,6 +28,53 @@ the water toward the sun. Supply the directional light's world-space +Y axis
 when using Wilderness's convention. The material expects opaque terrain and rocks
 to write depth before the forward water pass, and uses perspective camera depth.
 
+## Refraction
+
+To refract the lit riverbed and submerged rocks, apply the
+[opaque scene-color patch](opaque-scene-color.patch) to Hydroxus at
+`63b5452ff361c0b5d30a65cfbf485e1267eaf935`. Run `git apply` with that
+file from the Hydroxus checkout. The renderer takes one HDR color snapshot
+per view before the forward pass when a visible material requests it and its
+`sceneColorWeight` is positive. Materials that omit that property keep the
+default scene-color capture behavior.
+
+Point Wilderness and its graphics dependency at the same patched checkout.
+For a local test, add this to the Wilderness workspace manifest, adjusting
+the paths to your Hydroxus checkout:
+
+```toml
+[patch."https://github.com/d4140n-4h3-1/Hydroxus.git"]
+fyrox = { path = "../Hydroxus/fyrox" }
+fyrox-graphics-wgpu = { path = "../Hydroxus/fyrox-graphics-wgpu" }
+```
+
+After attaching the materials, enable refraction on both waterways:
+
+```rust
+river.set_refraction_strength(1.0);
+stream.set_refraction_strength(1.0);
+```
+
+The strength defaults to zero for compatibility with stock Hydroxus. The
+shader uses water's index of refraction (1.333) and the animated surface normal
+to redirect a sample of the opaque scene. It uses scene depth to fade the
+offset in shallows and reject samples that would pull near-bank geometry
+across the water. Refraction samples opaque surfaces visible in the current
+camera view.
+
+At full strength the shader still fades refraction with bed depth, view
+distance, and grazing angle. It uses one color sample where refraction is
+active. The shallow-water light pattern modulates that sample and uses the
+same current waves as the surface. Foam is evaluated only in shallow contact
+bands, and shared waves are evaluated only near configured confluences.
+The sun direction also dims the procedural reflection and foam at night.
+
+In a 960 × 540 offscreen software Vulkan test containing banks, shallows,
+deep water, and a confluence, the median draw dropped from 16.98 ms to
+12.64 ms with refraction enabled and from 12.60 ms to 5.28 ms with it disabled.
+The test isolates the water draw and excludes the HDR snapshot and other
+Wilderness rendering.
+
 ## Joining water surfaces
 
 Birch Glade's tributary mesh is trimmed to the receiving bank and eased into
@@ -81,6 +128,8 @@ The seed is recorded in each water node's GLB extras as `shore_seed`.
 
 The forward renderer and scene-depth binding were checked against Wilderness's
 pinned Hydroxus Vulkan revision, `63b5452`. Both shader stages were compiled
-offscreen. An offscreen Vulkan draw verified that opacity increases with depth.
+offscreen. Offscreen Vulkan draws verified the depth response and displacement
+of an opaque test pattern. The renderer patch was checked against the pinned
+revision.
 The GLB's flow UVs and junction geometry were checked from the binary export.
 Runtime rendering in Wilderness remains unverified.

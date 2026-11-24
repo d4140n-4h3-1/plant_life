@@ -3,6 +3,11 @@
 
     resources: [
         (
+            name: "fyrox_sceneColor",
+            kind: Texture(kind: Sampler2D, fallback: Black),
+            binding: 1
+        ),
+        (
             name: "fyrox_sceneDepth",
             kind: Texture(kind: DepthSampler2D, fallback: White),
             binding: 0
@@ -11,8 +16,9 @@
             name: "properties",
             kind: PropertyGroup([
                 (name: "flowPhase", kind: Float(value: 0.0)),
-                (name: "sunDirection", kind: Vector3(value: (-0.42, 0.74, -0.51))),
+                (name: "sunDirection", kind: Vector3(value: (-0.4234, 0.7460, -0.5141))),
                 (name: "foamStrength", kind: Float(value: 0.72)),
+                (name: "sceneColorWeight", kind: Float(value: 0.0)),
                 (name: "confluencePhase", kind: Float(value: 0.0)),
                 (name: "confluences", kind: Vector4Array(value: [], max_len: 8)),
             ]),
@@ -104,9 +110,10 @@
                     let sceneDepth = textureLoad(fyrox_sceneDepth_tex, vec2i(fragCoord.xy), 0);
                     let fragmentDepth = linearDepth(fragCoord.z);
                     let eye = fyrox_cameraData.position - worldPosition;
-                    let viewDir = normalize(eye);
+                    let eyeDistance = max(length(eye), 0.001);
+                    let viewDir = eye / eyeDistance;
                     let pathLength = clamp((linearDepth(sceneDepth) - fragmentDepth)
-                                           * length(eye) / max(fragmentDepth, 0.001), 0.0, 10.0);
+                                           * eyeDistance / max(fragmentDepth, 0.001), 0.0, 10.0);
                     let bedDepth = pathLength * clamp(abs(viewDir.y), 0.12, 1.0);
                     let contact = smoothstep(0.0, 0.043, pathLength);
 
@@ -132,52 +139,117 @@
                     let tangentNormal = gradient * sign(gradient.y) / max(length(gradient), 0.0000001);
                     let channelNormal = normalize(mix(upward, tangentNormal, 0.82));
 
-                    // Both surfaces use the same world-space waves in each junction.
+                    if (contact < 0.001) {
+                        return vec4f(0.0);
+                    }
+
+                    // Evaluate shared waves only at active junctions. Use squared distance.
                     var junctionWeight = 0.0;
                     for (var i = 0u; i < 8u; i += 1u) {
                         let junction = properties.confluences[i];
-                        let radius = max(junction.w, 0.001);
-                        let distanceToJoin = distance(worldPosition.xz, junction.xz);
-                        junctionWeight = max(junctionWeight, step(0.001, junction.w)
-                            * (1.0 - smoothstep(radius * 0.35, radius, distanceToJoin)));
+                        if (junction.w > 0.001) {
+                            let delta = worldPosition.xz - junction.xz;
+                            let radius2 = junction.w * junction.w;
+                            junctionWeight = max(junctionWeight,
+                                1.0 - smoothstep(radius2 * 0.1225, radius2, dot(delta, delta)));
+                        }
                     }
-                    let sharedPhase = properties.confluencePhase * 6.2831853;
-                    let commonA = dot(worldPosition.xz, vec2f(5.1, -6.4)) - 2.0 * sharedPhase;
-                    let commonB = dot(worldPosition.xz, vec2f(9.2, 4.8)) - 3.0 * sharedPhase;
-                    let slope = cos(commonA) * vec2f(0.075, -0.094)
-                              + cos(commonB) * vec2f(0.048, 0.025);
-                    let junctionNormal = normalize(vec3f(-slope.x, 1.0, -slope.y));
-                    let normal = normalize(mix(channelNormal, junctionNormal, junctionWeight));
-                    let facing = clamp(dot(normal, viewDir), 0.0, 1.0);
-                    let fresnel = 0.0204 + 0.9796 * pow(1.0 - facing, 5.0);
+                    var normal = channelNormal;
+                    var commonA = 0.0;
+                    var commonB = 0.0;
+                    if (junctionWeight > 0.0) {
+                        let sharedPhase = properties.confluencePhase * 6.2831853;
+                        commonA = dot(worldPosition.xz, vec2f(5.1, -6.4)) - 2.0 * sharedPhase;
+                        commonB = dot(worldPosition.xz, vec2f(9.2, 4.8)) - 3.0 * sharedPhase;
+                        let slope = cos(commonA) * vec2f(0.075, -0.094)
+                                   + cos(commonB) * vec2f(0.048, 0.025);
+                        let junctionNormal = normalize(vec3f(-slope.x, 1.0, -slope.y));
+                        normal = normalize(mix(channelNormal, junctionNormal, junctionWeight));
+                    }
+                    let grazing = 1.0 - clamp(dot(normal, viewDir), 0.0, 1.0);
+                    let grazing2 = grazing * grazing;
+                    let fresnel = 0.0204 + 0.9796 * grazing2 * grazing2 * grazing;
                     let reflected = reflect(-viewDir, normal);
 
                     // Analytic sky reflection and a broad, broken highlight from the main light.
                     let skyHeight = smoothstep(-0.08, 0.58, reflected.y);
                     let sky = mix(vec3f(0.19, 0.23, 0.24), vec3f(0.32, 0.42, 0.55), skyHeight);
-                    let sun = normalize(properties.sunDirection);
+                    // FlowingWater ships a unit direction for the sun.
+                    let sun = properties.sunDirection;
+                    let daylight = smoothstep(-0.12, 0.22, sun.y);
                     var highlight = pow(clamp(dot(reflected, sun), 0.0, 1.0), 105.0);
                     highlight *= smoothstep(0.015, 0.16, sun.y)
                                * mix(0.45 + 0.55 * broadWeight, 1.0, junctionWeight);
-                    let reflection = sky * fresnel + vec3f(1.0, 0.88, 0.67) * highlight * 0.37;
+                    let reflection = sky * fresnel * mix(0.09, 1.0, daylight) + vec3f(1.0, 0.88, 0.67) * highlight * 0.37;
 
                     let absorption = 1.0 - exp(-1.18 * pathLength);
-                    let body = mix(vec3f(0.088, 0.103, 0.060), vec3f(0.019, 0.062, 0.054), absorption);
+                    let body = mix(vec3f(0.088, 0.103, 0.060), vec3f(0.019, 0.062, 0.054), absorption) * mix(0.22, 1.0, daylight);
 
-                    // Leave most of the shoreline clear. Foam collects in broken streaks at contacts.
-                    let channelPatches = 0.53 + 0.25 * sin(roll * 2.0 + 0.55 * sin(ripple))
-                                          + 0.19 * sin(grain - roll);
-                    let patches = mix(channelPatches, 0.52 + 0.22 * sin(commonA) + 0.14 * sin(commonB), junctionWeight);
-                    let foamBand = smoothstep(0.012, 0.052, bedDepth)
+                    // Foam is a shallow contact effect. Keep the deep channel clear.
+                    var foam = 0.0;
+                    if (bedDepth > 0.012 && bedDepth < 0.24 && properties.foamStrength > 0.0) {
+                        let channelPatches = 0.53 + 0.25 * sin(roll * 2.0 + 0.55 * sin(ripple))
+                                              + 0.19 * sin(grain - roll);
+                        var patches = channelPatches;
+                        if (junctionWeight > 0.0) {
+                            patches = mix(channelPatches,
+                                0.52 + 0.22 * sin(commonA) + 0.14 * sin(commonB), junctionWeight);
+                        }
+                        let band = smoothstep(0.012, 0.052, bedDepth)
                                    * (1.0 - smoothstep(0.065, 0.24, bedDepth));
-                    let foam = foamBand * smoothstep(0.57, 0.91, patches)
-                               * mix(0.28 + 0.72 * fineWeight, 0.65, junctionWeight) * properties.foamStrength;
+                        foam = band * smoothstep(0.57, 0.91, patches)
+                             * mix(0.28 + 0.72 * fineWeight, 0.65, junctionWeight) * properties.foamStrength;
+                    }
 
                     // Convert premultiplied terms to the forward pass's straight-alpha blend.
                     let bodyWeight = absorption * (1.0 - fresnel);
                     var alpha = clamp((bodyWeight + fresnel + 0.23 * highlight) * contact, 0.0, 1.0);
                     var premultiplied = (body * bodyWeight + reflection) * contact;
-                    premultiplied = mix(premultiplied, vec3f(0.68, 0.76, 0.68), foam);
+                    // Fade refraction before distant or deep water would hide the riverbed.
+                    let refraction = clamp(properties.sceneColorWeight, 0.0, 1.0)
+                        * smoothstep(0.02, 0.10, pathLength)
+                        * (1.0 - smoothstep(1.6, 3.6, pathLength))
+                        * (1.0 - smoothstep(28.0, 58.0, eyeDistance))
+                        * (1.0 - smoothstep(0.65, 0.95, fresnel));
+                    if (refraction > 0.0) {
+                        let size = vec2f(textureDimensions(fyrox_sceneColor_tex, 0));
+                        let screen = fragCoord.xy / size;
+                        let incident = -viewDir;
+                        let transmitted = refract(incident, normal, 1.0 / 1.333);
+                        let surfaceClip = fyrox_cameraData.viewProjectionMatrix * vec4f(worldPosition, 1.0);
+                        let travel = min(pathLength, 2.4);
+                        let targetClip = fyrox_cameraData.viewProjectionMatrix
+                            * vec4f(worldPosition + transmitted * travel, 1.0);
+                        var sampleUv = screen;
+                        if (targetClip.w > 0.001 && surfaceClip.w > 0.001) {
+                            let projectionOffset = (targetClip.xy / targetClip.w
+                                - surfaceClip.xy / surfaceClip.w) * vec2f(0.5, -0.5);
+                            let offset = clamp(projectionOffset, vec2f(-0.04), vec2f(0.04));
+                            let candidate = screen + offset * smoothstep(0.04, 0.32, pathLength);
+                            if (all(candidate > vec2f(0.001)) && all(candidate < vec2f(0.999))) {
+                                let candidateDepth = textureLoad(fyrox_sceneDepth_tex, vec2i(candidate * size), 0);
+                                let clearance = linearDepth(candidateDepth) - fragmentDepth;
+                                sampleUv = mix(screen, candidate, smoothstep(0.025, 0.14, clearance));
+                            }
+                        }
+                        var bed = textureSampleLevel(fyrox_sceneColor_tex, fyrox_sceneColor_samp, sampleUv, 0.0).rgb;
+                        // Modulate the existing bed sample with faint, moving caustics.
+                        let causticWeight = daylight * fineWeight
+                            * smoothstep(0.05, 0.13, bedDepth) * (1.0 - smoothstep(0.25, 0.65, bedDepth));
+                        if (causticWeight > 0.0) {
+                            let channelCrest = 0.5 + 0.5 * sin(ripple + 0.6 * sin(roll));
+                            let sharedCrest = 0.5 + 0.5 * sin(commonA + 0.6 * sin(commonB));
+                            let crest = mix(channelCrest, sharedCrest, junctionWeight);
+                            let ridge = crest * crest;
+                            bed *= 1.0 + causticWeight * (0.24 * ridge * ridge - 0.047);
+                        }
+                        let transmission = exp(-vec3f(0.88, 0.38, 0.30) * pathLength);
+                        let inScatter = body * (vec3f(1.0) - transmission);
+                        let throughWater = (bed * transmission + inScatter) * (1.0 - fresnel);
+                        premultiplied = mix(premultiplied, (throughWater + reflection) * contact, refraction);
+                        alpha = mix(alpha, contact, refraction);
+                    }
+                    premultiplied = mix(premultiplied, vec3f(0.68, 0.76, 0.68) * mix(0.16, 1.0, daylight), foam);
                     alpha = mix(alpha, 1.0, foam);
                     return vec4f(premultiplied / max(alpha, 0.001), alpha);
                 }

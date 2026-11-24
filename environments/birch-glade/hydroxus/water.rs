@@ -34,10 +34,12 @@ impl FlowingWater {
             ResourceKind::Embedded,
             Shader::from_string(source)?,
         );
+        let mut water_material = Material::from_shader(shader);
+        water_material.set_property("sceneColorWeight", 0.0_f32);
         let material = MaterialResource::new_ok(
             Uuid::new_v4(),
             ResourceKind::Embedded,
-            Material::from_shader(shader),
+            water_material,
         );
 
         mesh.set_render_path(RenderPath::Forward);
@@ -50,6 +52,14 @@ impl FlowingWater {
             phase: 0.0,
             cycles_per_second,
         })
+    }
+
+    /// Set the refracted contribution from zero to one.
+    /// Requires the Hydroxus forward scene-color patch.
+    pub fn set_refraction_strength(&self, strength: f32) {
+        self.material
+            .data_ref()
+            .set_property("sceneColorWeight", strength.clamp(0.0, 1.0));
     }
 
     /// World-space direction from the water toward the sun.
