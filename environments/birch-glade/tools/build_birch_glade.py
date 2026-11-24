@@ -15,6 +15,7 @@ import build_granite_woodland as woodland
 
 sys.path.insert(0, str(woodland.ROOT / "assets" / "terrain" / "hydroxus-terrain"))
 import hydroxus_rivers
+from hydroxus_water_join import join_water_channels
 
 
 def trail_x(y):
@@ -150,6 +151,7 @@ def build_waterways(terrain, group):
     links.new(bump.outputs["Normal"], shader.inputs["Normal"])
     for water in (river, stream):
         hydroxus_rivers.set_water_uv(water)
+    join_water_channels(stream, river)
     return river, stream
 
 

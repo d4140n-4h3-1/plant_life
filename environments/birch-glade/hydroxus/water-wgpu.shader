@@ -3,8 +3,19 @@
 
     resources: [
         (
+            name: "fyrox_sceneDepth",
+            kind: Texture(kind: DepthSampler2D, fallback: White),
+            binding: 0
+        ),
+        (
             name: "properties",
-            kind: PropertyGroup([(name: "flowPhase", kind: Float(value: 0.0))]),
+            kind: PropertyGroup([
+                (name: "flowPhase", kind: Float(value: 0.0)),
+                (name: "sunDirection", kind: Vector3(value: (-0.42, 0.74, -0.51))),
+                (name: "foamStrength", kind: Float(value: 0.72)),
+                (name: "confluencePhase", kind: Float(value: 0.0)),
+                (name: "confluences", kind: Vector4Array(value: [], max_len: 8)),
+            ]),
             binding: 2
         ),
         (
@@ -79,18 +90,96 @@
 
            fragment_shader:
                r#"
-                @fragment fn fs_main(@location(0) uv: vec2f, @location(1) worldPosition: vec3f) -> @location(0) vec4f {
+                fn linearDepth(z: f32) -> f32 {
+                    return (fyrox_cameraData.zFar * fyrox_cameraData.zNear)
+                         / (fyrox_cameraData.zFar - z * fyrox_cameraData.zRange);
+                }
+
+                @fragment fn fs_main(
+                    @location(0) uv: vec2f,
+                    @location(1) worldPosition: vec3f,
+                    @builtin(position) fragCoord: vec4f,
+                ) -> @location(0) vec4f {
+                    // Reconstruct the distance from this fragment to the opaque riverbed.
+                    let sceneDepth = textureLoad(fyrox_sceneDepth_tex, vec2i(fragCoord.xy), 0);
+                    let fragmentDepth = linearDepth(fragCoord.z);
+                    let eye = fyrox_cameraData.position - worldPosition;
+                    let viewDir = normalize(eye);
+                    let pathLength = clamp((linearDepth(sceneDepth) - fragmentDepth)
+                                           * length(eye) / max(fragmentDepth, 0.001), 0.0, 10.0);
+                    let bedDepth = pathLength * clamp(abs(viewDir.y), 0.12, 1.0);
+                    let contact = smoothstep(0.0, 0.043, pathLength);
+
+                    // Advect waves along the channel. Integer phase multipliers keep wrapping seamless.
                     let phase = properties.flowPhase * 6.2831853;
-                    let a = 9.0 * uv.x + 3.4 * uv.y - 2.0 * phase;
-                    let b = 14.0 * uv.x - 6.0 * uv.y - 3.0 * phase;
-                    let c = 5.4 * uv.x + 9.1 * uv.y - phase;
-                    let view = normalize(fyrox_cameraData.position - worldPosition);
-                    let fresnel = pow(1.0 - abs(view.y), 3.5);
-                    let ripple = 0.031 * cos(a) + 0.024 * cos(b) + 0.016 * cos(c);
-                    let glint = pow(clamp(0.5 + 0.5 * sin(a + 0.32 * sin(c)), 0.0, 1.0), 12.0);
-                    let color = mix(vec3f(0.029, 0.078, 0.060), vec3f(0.23, 0.32, 0.35), fresnel)
-                              + vec3f(0.46, 0.68, 0.72) * (ripple + 0.035 * glint);
-                    return vec4f(color, mix(0.43, 0.84, fresnel));
+                    let u = uv.x;
+                    let v = uv.y;
+                    let bend = sin(u * 0.89 + v * 2.13) * 0.57;
+                    let roll = u * 3.05 + v * 2.2 + bend - phase;
+                    let ripple = u * 8.4 - v * 3.9 + bend - 3.0 * phase;
+                    let grain = u * 16.7 + v * 7.2 - bend - 5.0 * phase;
+                    let broadWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(roll));
+                    let fineWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(ripple));
+                    let grainWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(grain));
+                    let wave = sin(roll) * (0.020 * broadWeight)
+                               + sin(ripple) * (0.009 * fineWeight)
+                               + sin(grain) * (0.003 * grainWeight);
+
+                    // Use surface derivatives to tilt the reflection along the curved ribbon.
+                    let bumped = worldPosition + vec3f(0.0, 1.0, 0.0) * wave;
+                    let gradient = cross(dpdx(bumped), dpdy(bumped));
+                    let upward = vec3f(0.0, 1.0, 0.0);
+                    let tangentNormal = gradient * sign(gradient.y) / max(length(gradient), 0.0000001);
+                    let channelNormal = normalize(mix(upward, tangentNormal, 0.82));
+
+                    // Both surfaces use the same world-space waves in each junction.
+                    var junctionWeight = 0.0;
+                    for (var i = 0u; i < 8u; i += 1u) {
+                        let junction = properties.confluences[i];
+                        let radius = max(junction.w, 0.001);
+                        let distanceToJoin = distance(worldPosition.xz, junction.xz);
+                        junctionWeight = max(junctionWeight, step(0.001, junction.w)
+                            * (1.0 - smoothstep(radius * 0.35, radius, distanceToJoin)));
+                    }
+                    let sharedPhase = properties.confluencePhase * 6.2831853;
+                    let commonA = dot(worldPosition.xz, vec2f(5.1, -6.4)) - 2.0 * sharedPhase;
+                    let commonB = dot(worldPosition.xz, vec2f(9.2, 4.8)) - 3.0 * sharedPhase;
+                    let slope = cos(commonA) * vec2f(0.075, -0.094)
+                              + cos(commonB) * vec2f(0.048, 0.025);
+                    let junctionNormal = normalize(vec3f(-slope.x, 1.0, -slope.y));
+                    let normal = normalize(mix(channelNormal, junctionNormal, junctionWeight));
+                    let facing = clamp(dot(normal, viewDir), 0.0, 1.0);
+                    let fresnel = 0.0204 + 0.9796 * pow(1.0 - facing, 5.0);
+                    let reflected = reflect(-viewDir, normal);
+
+                    // Analytic sky reflection and a broad, broken highlight from the main light.
+                    let skyHeight = smoothstep(-0.08, 0.58, reflected.y);
+                    let sky = mix(vec3f(0.19, 0.23, 0.24), vec3f(0.32, 0.42, 0.55), skyHeight);
+                    let sun = normalize(properties.sunDirection);
+                    var highlight = pow(clamp(dot(reflected, sun), 0.0, 1.0), 105.0);
+                    highlight *= smoothstep(0.015, 0.16, sun.y)
+                               * mix(0.45 + 0.55 * broadWeight, 1.0, junctionWeight);
+                    let reflection = sky * fresnel + vec3f(1.0, 0.88, 0.67) * highlight * 0.37;
+
+                    let absorption = 1.0 - exp(-1.18 * pathLength);
+                    let body = mix(vec3f(0.088, 0.103, 0.060), vec3f(0.019, 0.062, 0.054), absorption);
+
+                    // Leave most of the shoreline clear. Foam collects in broken streaks at contacts.
+                    let channelPatches = 0.53 + 0.25 * sin(roll * 2.0 + 0.55 * sin(ripple))
+                                          + 0.19 * sin(grain - roll);
+                    let patches = mix(channelPatches, 0.52 + 0.22 * sin(commonA) + 0.14 * sin(commonB), junctionWeight);
+                    let foamBand = smoothstep(0.012, 0.052, bedDepth)
+                                   * (1.0 - smoothstep(0.065, 0.24, bedDepth));
+                    let foam = foamBand * smoothstep(0.57, 0.91, patches)
+                               * mix(0.28 + 0.72 * fineWeight, 0.65, junctionWeight) * properties.foamStrength;
+
+                    // Convert premultiplied terms to the forward pass's straight-alpha blend.
+                    let bodyWeight = absorption * (1.0 - fresnel);
+                    var alpha = clamp((bodyWeight + fresnel + 0.23 * highlight) * contact, 0.0, 1.0);
+                    var premultiplied = (body * bodyWeight + reflection) * contact;
+                    premultiplied = mix(premultiplied, vec3f(0.68, 0.76, 0.68), foam);
+                    alpha = mix(alpha, 1.0, foam);
+                    return vec4f(premultiplied / max(alpha, 0.001), alpha);
                 }
                "#,
         )
