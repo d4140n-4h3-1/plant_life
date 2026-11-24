@@ -12,7 +12,7 @@ from mathutils import Vector
 
 ASSET = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ASSET.parent / "hanging-lantern" / "tools"))
-from build_lantern import bar, cube, join, mesh, pbr, point_at, revolve
+from build_lantern import bar, cube, join, light_optional, mesh, pbr, point_at, revolve
 
 
 def empty(name, parent=None, position=(0, 0, 0)):
@@ -329,11 +329,13 @@ def main():
     bpy.ops.export_scene.gltf(filepath=str(output / "player-lantern.glb"),
                               export_format="GLB", export_lights=True,
                               export_animation_mode="ACTIONS")
+    light_optional(output / "player-lantern.glb")
     make_player(grip)
     scene.name = "Lantern Walk"
     bpy.ops.export_scene.gltf(filepath=str(output / "player-lantern-walk.glb"),
                               export_format="GLB", export_lights=True,
                               export_animation_mode="SCENE", export_anim_scene_split_object=False)
+    light_optional(output / "player-lantern-walk.glb")
     cam = make_preview(scene)
     scene.frame_end = 47
     scene.frame_set(3)

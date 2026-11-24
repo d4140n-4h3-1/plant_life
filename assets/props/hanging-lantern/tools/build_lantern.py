@@ -1,7 +1,9 @@
 """Build an animated hanging lantern, a portable GLB, and previews."""
 import argparse
+import json
 from math import cos, radians, sin, tau
 from pathlib import Path
+import struct
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -13,6 +15,27 @@ from mathutils import Quaternion, Vector
 ASSET=Path(__file__).resolve().parents[1]
 PERIOD=96
 FPS=24
+
+
+def light_optional(path):
+    """Leave KHR_lights_punctual in the GLB's extensionsUsed, but not extensionsRequired.
+
+    Blender's exporter marks the light extension as required. Then an importer that does not read
+    lights refuses to load the model. The light is an optional extra for those importers.
+    """
+    data=Path(path).read_bytes()
+    length=struct.unpack_from("<I",data,12)[0]
+    doc=json.loads(data[20:20+length])
+    required=[name for name in doc.get("extensionsRequired",[]) if name!="KHR_lights_punctual"]
+    if required:
+        doc["extensionsRequired"]=required
+    else:
+        doc.pop("extensionsRequired",None)
+    chunk=json.dumps(doc,separators=(",",":")).encode()
+    chunk+=b" "*(-len(chunk)%4)
+    rest=data[20+length:]
+    header=data[:8]+struct.pack("<I",20+len(chunk)+len(rest))
+    Path(path).write_bytes(header+struct.pack("<I",len(chunk))+b"JSON"+chunk+rest)
 
 
 def pbr(name, color, metal=0, roughness=.50, alpha=1, emission=0):
@@ -348,6 +371,7 @@ def main():
     bpy.ops.export_scene.gltf(filepath=str(output/"hanging-lantern.glb"),export_format="GLB",
                               use_selection=True,export_animations=True,export_lights=True,
                               export_extras=True,export_animation_mode="ACTIONS")
+    light_optional(output/"hanging-lantern.glb")
     scene=preview()
     scene.frame_set(10)
     bpy.context.preferences.filepaths.save_version=0
