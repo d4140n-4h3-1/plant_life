@@ -74,7 +74,7 @@ def carve_channel(terrain, group, name, source, width, depth, shore_rng, join=No
             raise RuntimeError("The tributary route did not reach the river")
         scene.hxr_steps = steps
     existing = set(bpy.data.objects)
-    if bpy.ops.hx.river() != {"FINISHED"}:
+    if bpy.ops.hx.river(build_bed=False) != {"FINISHED"}:
         raise RuntimeError(f"Hydroxus failed to carve {name}")
     water, = set(bpy.data.objects) - existing
     water.name = name
@@ -115,7 +115,6 @@ def carve_channel(terrain, group, name, source, width, depth, shore_rng, join=No
         mesh.vertices[i * 2].co = center - lateral * (bank_widths[0] + margin)
         mesh.vertices[i * 2 + 1].co = center + lateral * (bank_widths[1] + margin)
         sections.append((center, lateral, bank_widths, distance))
-    mesh.flip_normals()
     for face in mesh.polygons:
         face.use_smooth = True
     mesh.update()
@@ -315,6 +314,7 @@ def build(shore_seed, output, render=False):
     terrain, = groups["Terrain"].objects
     waterways, shorelines = build_waterways(terrain, groups["Waterways"], shore_rng)
     tint_shore(terrain, shore_rng)
+    hydroxus_rivers.dress_channel_beds(terrain, waterways, shore_seed, groups["Terrain"])
     for water in waterways:
         water["shore_seed"] = str(shore_seed)
     add_outer_ground(groups["Terrain"], terrain.data.materials[0])

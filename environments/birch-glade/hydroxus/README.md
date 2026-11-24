@@ -98,8 +98,17 @@ up to eight junctions.
 
 To author another channel, use the
 [Hydroxus Rivers and Streams add-on](../../../assets/terrain/hydroxus-terrain/hydroxus_rivers.py).
-Its river operator writes flow UVs automatically. After editing a paired ribbon,
-call `hydroxus_rivers.set_water_uv(water_object)` before joining or exporting.
+Place the cursor at the source, select the terrain, and run **Trace River
+and Bed from 3D Cursor**. One operation traces the slope, cuts the channel,
+writes the flow UVs, and shapes the submerged terrain into gravel bars and
+scoured runs. **Bed Seed** controls the relief and the embedded gravel
+placement. Gravel is batched into one opaque mesh capped at 480 stones, with an embedded stone texture atlas.
+
+After editing a paired ribbon, call `hydroxus_rivers.set_water_uv(water_object)`
+before joining or exporting. A scripted build that needs to join several
+channels can call `hx.river(build_bed=False)` for each trace, then
+`hydroxus_rivers.dress_channel_beds(terrain, waterways, seed, collection)` once
+after joining. Birch Glade uses its shoreline seed for the bed as well.
 
 At a junction, call the [water join tool](../../../assets/terrain/hydroxus-terrain/hydroxus_water_join.py)
 as `join_water_channels(tributary, receiving)` after positioning the two meshes.
