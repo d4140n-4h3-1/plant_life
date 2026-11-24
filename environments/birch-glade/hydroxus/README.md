@@ -39,7 +39,7 @@ so the ripples and foam transition to one shared pattern at the seam.
 use fyrox::core::algebra::Vector4;
 
 // Birch Glade at its original import transform. xyz is the center, w the radius.
-let junction = Vector4::new(-5.900, 0.811, -5.387, 2.2);
+let junction = Vector4::new(-6.540, 0.805, -5.314, 2.2);
 river.set_confluences(&[junction]);
 stream.set_confluences(&[junction]);
 ```
@@ -62,6 +62,22 @@ also stores a Blender-local center on the tributary in `join_center_local`.
 Convert Blender coordinates `(x, y, z)` to glTF/Hydroxus coordinates
 `(x, z, -y)` before using them in the game. Export with UVs enabled and
 **FlowUV** as the first UV layer.
+
+## Shoreline variants
+
+The reference scene uses shoreline seed `2741`. Rebuild with any integer
+`--shore-seed`, or use `--random-shore` to draw a fresh seed and print it in the
+build log. The seed varies both banks independently, changes the shallow bank
+profile, and breaks gravel and bank plants into uneven patches.
+
+```sh
+blender -b --python-exit-code 1 \
+  --python environments/birch-glade/tools/build_birch_glade.py \
+  -- --shore-seed 591038123 --output-dir /tmp/birch-glade-variant
+```
+
+Use the variant's `join_center_local` when setting its shader confluence.
+The seed is recorded in each water node's GLB extras as `shore_seed`.
 
 The forward renderer and scene-depth binding were checked against Wilderness's
 pinned Hydroxus Vulkan revision, `63b5452`. Both shader stages were compiled

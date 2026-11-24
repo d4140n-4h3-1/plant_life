@@ -1,13 +1,15 @@
 """Build a birch glade using the plant_life asset library."""
+import argparse
 from collections import Counter
 from math import cos, exp, sin, tau
 from pathlib import Path
-from random import Random
+from random import Random, SystemRandom
 import sys
 
 import bpy
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
+from mathutils.kdtree import KDTree
 
 OUTPUT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(OUTPUT.parent / "granite-woodland" / "tools"))
@@ -51,7 +53,7 @@ def elevation(x, y):
     return grade + river_bank + terrace * (ridge + floor + undulation)
 
 
-def carve_channel(terrain, group, name, source, width, depth, join=None):
+def carve_channel(terrain, group, name, source, width, depth, shore_rng, join=None):
     scene = bpy.context.scene
     scene.cursor.location = (*source, 0)
     scene.hxr_width = width
@@ -93,27 +95,89 @@ def carve_channel(terrain, group, name, source, width, depth, join=None):
         neighbors = centers[max(0, i - 3):i + 4]
         smooth.append(sum(neighbors, Vector()) / len(neighbors))
     smooth.append(centers[-1])
+    # Each bank gets independent, spatially coherent variations at three scales.
+    phases = [[shore_rng.uniform(0, tau) for _ in range(3)] for _ in range(2)]
+    sections = []
+    distance = 0.0
     for i, center in enumerate(smooth):
         tangent = smooth[min(i + 1, len(smooth) - 1)] - smooth[max(i - 1, 0)]
         lateral = Vector((-tangent.y, tangent.x, 0)).normalized()
-        mesh.vertices[i * 2].co = center - lateral * (width * 0.49)
-        mesh.vertices[i * 2 + 1].co = center + lateral * (width * 0.49)
+        if i:
+            distance += (center.xy - smooth[i - 1].xy).length
+        bank_widths = tuple(
+            width * (0.49 + 0.075 * sin(0.86 * distance + broad)
+                     + 0.038 * sin(1.74 * distance + middle)
+                     + 0.017 * sin(3.4 * distance + fine))
+            for broad, middle, fine in phases
+        )
+        # Extend the render surface under the banks so the terrain defines the edge.
+        margin = width * 0.13 + 0.12
+        mesh.vertices[i * 2].co = center - lateral * (bank_widths[0] + margin)
+        mesh.vertices[i * 2 + 1].co = center + lateral * (bank_widths[1] + margin)
+        sections.append((center, lateral, bank_widths, distance))
     mesh.flip_normals()
     for face in mesh.polygons:
         face.use_smooth = True
     mesh.update()
-    return water
+    return water, sections
 
 
-def build_waterways(terrain, group):
+def shape_banks(terrain, channels):
+    """Shape shallow shelves along the seeded waterlines, behind the water edges."""
+    indexed_channels = []
+    for sections in channels:
+        tree = KDTree(len(sections))
+        for index, (center, _, _, _) in enumerate(sections):
+            tree.insert(Vector((center.x, center.y, 0)), index)
+        tree.balance()
+        indexed_channels.append((tree, sections))
+
+    for vertex in terrain.data.vertices:
+        point = vertex.co
+        original = point.z
+        targets = []
+        for tree, sections in indexed_channels:
+            _, index, separation = tree.find(Vector((point.x, point.y, 0)))
+            if separation > 2.7:
+                continue
+            a = sections[max(0, index - 1)]
+            b = sections[min(len(sections) - 1, index + 1)]
+            span = b[0].xy - a[0].xy
+            if span.length_squared < 1.0e-8:
+                continue
+            t = min(1.0, max(0.0, (point.xy - a[0].xy).dot(span) / span.length_squared))
+            center = a[0].lerp(b[0], t)
+            lateral = a[1].lerp(b[1], t).normalized()
+            cross = (point - center).dot(lateral)
+            side = int(cross >= 0)
+            width = a[2][side] + t * (b[2][side] - a[2][side])
+            offset = abs(cross) - width
+            # The gradual approach on the wet side creates shallow gravel shelves.
+            if not -0.72 < offset < 0.73:
+                if offset <= -0.72:
+                    targets.append(min(original, center.z - 0.28))
+                continue
+            influence = min(1.0, (offset + 0.72) / 0.44, (0.73 - offset) / 0.43)
+            along = a[3] + t * (b[3] - a[3])
+            influence *= min(1.0, along / 0.7, (sections[-1][3] - along) / 0.7)
+            profile = center.z + offset * (0.37 if offset < 0 else 0.52)
+            targets.append(original + (profile - original) * influence)
+        if targets:
+            point.z = min(targets)
+    terrain.data.update()
+
+
+def build_waterways(terrain, group, shore_rng):
     bpy.context.view_layer.objects.active = terrain
     terrain.select_set(True)
     bpy.context.view_layer.update()
     hydroxus_rivers.register()
     try:
-        river = carve_channel(terrain, group, "Birch River", (river_x(23), 23), 2.65, 0.83)
-        stream = carve_channel(
-            terrain, group, "Fern Stream", (-14, stream_y(-14)), 1.13, 0.48,
+        river, river_banks = carve_channel(
+            terrain, group, "Birch River", (river_x(23), 23), 2.65, 0.83, shore_rng,
+        )
+        stream, stream_banks = carve_channel(
+            terrain, group, "Fern Stream", (-14, stream_y(-14)), 1.13, 0.48, shore_rng,
             join=lambda point: point.x >= river_x(point.y) - 0.84,
         )
         river_surface = BVHTree.FromObject(river, bpy.context.evaluated_depsgraph_get())
@@ -151,11 +215,14 @@ def build_waterways(terrain, group):
     links.new(bump.outputs["Normal"], shader.inputs["Normal"])
     for water in (river, stream):
         hydroxus_rivers.set_water_uv(water)
+    banks = (river_banks, stream_banks)
+    shape_banks(terrain, banks)
     join_water_channels(stream, river)
-    return river, stream
+    return (river, stream), banks
 
 
-def tint_shore(terrain):
+def tint_shore(terrain, shore_rng):
+    phase = shore_rng.uniform(0, tau)
     color = terrain.data.color_attributes["Trail tint"]
     for vertex in terrain.data.vertices:
         x, y, z = vertex.co
@@ -167,7 +234,8 @@ def tint_shore(terrain):
         else:
             continue
         above = z - water_height
-        variation = 0.5 + 0.5 * sin(x * 5.8 + y * 2.3) * cos(y * 3.9)
+        variation = (0.50 + 0.28 * sin(x * 1.4 + y * 0.9 + phase)
+                     + 0.20 * sin(x * 5.8 + y * 2.3 + phase) * cos(y * 3.9))
         weight = max(0.0, 1.0 - abs(above - 0.04) / (0.24 + 0.13 * variation))
         weight *= 0.86
         shore = (0.52 + 0.23 * variation, 0.45 + 0.19 * variation, 0.32 + 0.16 * variation)
@@ -222,11 +290,13 @@ def add_outer_ground(group, material):
         group.objects.link(bpy.data.objects.new(name, mesh))
 
 
-def build():
+def build(shore_seed, output, render=False):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     scene.unit_settings.system = "METRIC"
     rng = Random(43)
+    shore_rng = Random(shore_seed)
+    output.mkdir(parents=True, exist_ok=True)
     woodland.trail_x = trail_x
     woodland.edge = trail_edge
     woodland.height = elevation
@@ -243,8 +313,10 @@ def build():
         scene.collection.children.link(groups[name])
     woodland.ground(groups["Terrain"])
     terrain, = groups["Terrain"].objects
-    waterways = build_waterways(terrain, groups["Waterways"])
-    tint_shore(terrain)
+    waterways, shorelines = build_waterways(terrain, groups["Waterways"], shore_rng)
+    tint_shore(terrain, shore_rng)
+    for water in waterways:
+        water["shore_seed"] = str(shore_seed)
     add_outer_ground(groups["Terrain"], terrain.data.materials[0])
     terrain_surface = BVHTree.FromObject(terrain, bpy.context.evaluated_depsgraph_get())
     water_surfaces = [
@@ -256,8 +328,12 @@ def build():
         return hit.z if hit is not None else outer_elevation(x, y)
 
     def in_water(x, y):
-        return any(surface.ray_cast((x, y, 25), (0, 0, -1))[0] is not None
-                   for surface in water_surfaces)
+        ground_z = surface_z(x, y)
+        for surface in water_surfaces:
+            hit, _, _, _ = surface.ray_cast((x, y, 25), (0, 0, -1))
+            if hit is not None and hit.z > ground_z:
+                return True
+        return False
 
     meshes = {
         species: woodland.load_mesh(woodland.MODELS[species])
@@ -360,33 +436,36 @@ def build():
         if clear(x, y):
             place("Granite cobble", "Granite", x, y, rng.uniform(0.35, 1.1), 0.025)
 
-    # Follow the brush edges so wet gravel and bank plants track the actual cuts.
-    for water in waterways:
-        vertices = water.data.vertices
-        for index in range(4, len(vertices) - 4, 4):
-            if rng.random() < 0.24:
-                continue
-            for side in (0, 1):
-                bank = vertices[index + side].co
-                opposite = vertices[index + 1 - side].co
-                outward = (bank - opposite).normalized()
-                for _ in range(rng.randint(2, 4)):
-                    point = bank + outward * rng.uniform(-0.31, 0.52)
-                    x = point.x + rng.uniform(-0.23, 0.23)
-                    y = point.y + rng.uniform(-0.23, 0.23)
-                    place("Granite cobble", "Granite", x, y, rng.uniform(0.12, 0.56),
-                          0.007, allow_water=True)
-                if rng.random() < 0.48:
-                    point = bank + outward * rng.uniform(0.52, 1.2)
-                    species = "Hard fern" if rng.random() < 0.36 else "Wood melick"
-                    place(species, "Understory", point.x, point.y, rng.uniform(0.45, 0.85))
+    # Scatter gravel in asymmetric bars, with gaps and clusters of vegetation.
+    for sections in shorelines:
+        for side, direction in enumerate((-1, 1)):
+            patch_phase = shore_rng.uniform(0, tau)
+            for center, lateral, widths, distance in sections:
+                if distance < 0.5 or distance > sections[-1][3] - 0.65:
+                    continue
+                patch = 0.50 + 0.30 * sin(0.72 * distance + patch_phase)
+                patch += 0.20 * sin(1.83 * distance - patch_phase)
+                if shore_rng.random() > 0.12 + 0.70 * patch:
+                    continue
+                outward = lateral * direction
+                edge = center + outward * widths[side]
+                for _ in range(shore_rng.randint(1, 3)):
+                    position = edge + outward * shore_rng.uniform(-0.31, 0.58)
+                    x = position.x + shore_rng.uniform(-0.20, 0.20)
+                    y = position.y + shore_rng.uniform(-0.20, 0.20)
+                    size = shore_rng.uniform(0.25, 0.79) ** 2
+                    place("Granite cobble", "Granite", x, y, size, 0.007, allow_water=True)
+                if patch > 0.56 and shore_rng.random() < 0.48:
+                    point = edge + outward * shore_rng.uniform(0.54, 1.25)
+                    species = "Hard fern" if shore_rng.random() < 0.40 else "Wood melick"
+                    place(species, "Understory", point.x, point.y, shore_rng.uniform(0.42, 0.86))
 
     for y in (-7.1, -0.5, 8.8, 12.6):
         place("Granite boulder", "Granite", river_x(y) + 0.74, y, rng.uniform(0.65, 0.98),
               0.02, allow_water=True)
 
     bpy.ops.export_scene.gltf(
-        filepath=str(OUTPUT / "birch-glade.glb"), export_format="GLB",
+        filepath=str(output / "birch-glade.glb"), export_format="GLB",
         export_tangents=True, export_extras=True, export_vertex_color="ACTIVE",
         export_all_vertex_colors=False,
     )
@@ -417,12 +496,21 @@ def build():
     scene.render.filepath = "//birch-glade.png"
     bpy.ops.file.pack_all()
     bpy.context.preferences.filepaths.save_version = 0
-    bpy.ops.wm.save_as_mainfile(filepath=str(OUTPUT / "birch-glade.blend"))
+    bpy.ops.wm.save_as_mainfile(filepath=str(output / "birch-glade.blend"))
     print(f"Birch Glade placements: {dict(counts)}", flush=True)
-    if "--render" in sys.argv:
-        scene.render.filepath = str(OUTPUT / "birch-glade.png")
+    if render:
+        scene.render.filepath = str(output / "birch-glade.png")
         bpy.ops.render.render(write_still=True)
 
 
 if __name__ == "__main__":
-    build()
+    parser = argparse.ArgumentParser(description=__doc__)
+    seeds = parser.add_mutually_exclusive_group()
+    seeds.add_argument("--shore-seed", type=int, default=2741)
+    seeds.add_argument("--random-shore", action="store_true")
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT)
+    parser.add_argument("--render", action="store_true")
+    args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
+    seed = SystemRandom().randrange(2**32) if args.random_shore else args.shore_seed
+    print(f"Shore seed: {seed}", flush=True)
+    build(seed, args.output_dir.resolve(), args.render)
