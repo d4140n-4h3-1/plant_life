@@ -26,11 +26,23 @@ def bark_maps(willow):
         finally:
             bpy.data.images.remove(image)
 
+    def blur(values, radius):
+        frequencies = np.fft.fftfreq(SIZE)
+        kernel = np.exp(-2*np.pi**2*radius**2
+                        * (frequencies[:, None]**2 + frequencies[None, :]**2))
+        return np.fft.ifft2(np.fft.fft2(values)*kernel).real
+
     color = read_map("diff")[..., :3]
     if not willow:
         color = color * np.array((.83, .80, .77))
-    return (color, read_map("disp")[..., 0], read_map("rough")[..., 0],
-            read_map("ao")[..., 0], 3.2)
+    # The scanned displacement is mostly broad undulation; keep the fissures and
+    # plates that shade the bark at texture scale, as bark_swatch_maps does.
+    displacement = read_map("disp")[..., 0]
+    height = np.clip(.5 + 2.8*(blur(displacement, .75) - blur(displacement, 21)), 0, 1)
+    # Soften the scanned occlusion so the trunk is not darkened twice by the renderer's own.
+    occlusion = 1 - .4*(1 - read_map("ao")[..., 0])
+    return (color, height, read_map("rough")[..., 0], occlusion,
+            5.5 if willow else 5.0)
 
 
 def tree_mesh(maps, seed, willow):
