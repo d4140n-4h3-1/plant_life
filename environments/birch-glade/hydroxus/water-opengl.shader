@@ -20,8 +20,12 @@
                 (name: "foamStrength", kind: Float(value: 0.72)),
                 (name: "waveStrength", kind: Float(value: 1.0)),
                 (name: "sceneColorWeight", kind: Float(value: 0.0)),
+                (name: "reflectionWeight", kind: Float(value: 0.0)),
                 (name: "confluencePhase", kind: Float(value: 0.0)),
                 (name: "confluences", kind: Vector4Array(value: [], max_len: 8)),
+                (name: "obstaclePhase", kind: Float(value: 0.0)),
+                (name: "obstacleCount", kind: Int(value: 0)),
+                (name: "obstacles", kind: Vector4Array(value: [], max_len: 8)),
             ]),
             binding: 2
         ),
@@ -103,6 +107,41 @@
                          / (fyrox_cameraData.zFar - z * fyrox_cameraData.zRange);
                 }
 
+                // Three bounded steps against the opaque depth snapshot, with sky fallback.
+                vec4 traceReflection(vec3 origin, vec3 direction) {
+                    mat4 viewProjection = fyrox_cameraData.viewProjectionMatrix;
+                    vec4 start = viewProjection * vec4(origin + vec3(0.0, 0.045, 0.0), 1.0);
+                    vec4 ray = viewProjection * vec4(direction, 0.0);
+                    vec2 bounds = vec2(textureSize(fyrox_sceneDepth, 0));
+                    vec2 previousUv = vec2(0.0);
+                    float previousGap = -1.0;
+                    bool haveFront = false;
+                    const float distances[3] = float[3](0.65, 1.9, 4.4);
+                    for (int i = 0; i < 3; ++i) {
+                        float stepDistance = distances[i];
+                        vec4 point = start + ray * stepDistance;
+                        if (point.w <= 0.001) { break; }
+                        vec2 uv = point.xy / point.w * 0.5 + 0.5;
+                        if (any(lessThan(uv, vec2(0.008))) || any(greaterThan(uv, vec2(0.992)))) { break; }
+                        float depth = texelFetch(fyrox_sceneDepth, ivec2(uv * bounds), 0).r;
+                        float gap = point.w - linearDepth(depth);
+                        if (haveFront && gap >= 0.0) {
+                            vec2 crossing = mix(previousUv, uv, -previousGap / max(gap-previousGap, 0.001));
+                            float border = min(min(crossing.x, crossing.y), min(1.0-crossing.x, 1.0-crossing.y));
+                            float confidence = smoothstep(0.01, 0.13, border)
+                                * (1.0 - smoothstep(0.14, 0.64, gap))
+                                * (1.0 - smoothstep(2.6, 4.8, stepDistance));
+                            if (confidence <= 0.0) { break; }
+                            vec3 color = textureLod(fyrox_sceneColor, uv, 0.0).rgb;
+                            return vec4(color, confidence);
+                        }
+                        previousUv = uv;
+                        previousGap = gap;
+                        haveFront = gap < 0.0;
+                    }
+                    return vec4(0.0);
+                }
+
                 void main() {
                     vec4 fragCoord = gl_FragCoord;
                     vec2 uv = flowUv;
@@ -121,23 +160,37 @@
                     float phase = properties.flowPhase * 6.2831853;
                     float u = uv.x;
                     float v = uv.y;
-                    float bend = sin(u * 0.89 + v * 2.13) * 0.57;
+                    float bend = 0.67 * sin(u * 0.89 + v * 2.13)
+                                    + 0.31 * sin(u * 2.27 - v * 3.41 + phase);
                     float roll = u * 3.05 + v * 2.2 + bend - phase;
                     float ripple = u * 8.4 - v * 3.9 + bend - 3.0 * phase;
                     float grain = u * 16.7 + v * 7.2 - bend - 5.0 * phase;
                     float broadWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(roll));
                     float fineWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(ripple));
                     float grainWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(grain));
-                    float wave = sin(roll) * (0.020 * broadWeight)
-                               + sin(ripple) * (0.009 * fineWeight)
-                               + sin(grain) * (0.003 * grainWeight);
+                    float wave = sin(roll) * (0.014 * broadWeight)
+                               + sin(ripple) * (0.006 * fineWeight)
+                               + sin(grain) * (0.0018 * grainWeight);
 
-                    // Use surface derivatives to tilt the reflection along the curved ribbon.
-                    vec3 bumped = worldPosition + vec3(0.0, 1.0, 0.0) * (wave * properties.waveStrength);
+                    // Use a level tangent plane so the ribbon's triangle slopes cannot
+                    // imprint stripes on the optical normal.
+                    float farRipple = mix(1.0, 0.18, smoothstep(6.0, 15.0, eyeDistance));
+                    vec3 bumped = vec3(worldPosition.x, wave * properties.waveStrength * farRipple, worldPosition.z);
                     vec3 gradient = cross(dFdx(bumped), dFdy(bumped));
                     vec3 upward = vec3(0.0, 1.0, 0.0);
                     vec3 tangentNormal = gradient * sign(gradient.y) / max(length(gradient), 0.0000001);
-                    vec3 channelNormal = normalize(mix(upward, tangentNormal, 0.82));
+                    // World-space capillary waves remain continuous across UV and mesh seams.
+                    float crossGust = sin(dot(worldPosition.xz, vec2(3.7, -2.8)) - 2.0 * phase);
+                    float capillaryA = dot(worldPosition.xz, vec2(25.1, -14.2)) + 1.35 * crossGust - 7.0 * phase;
+                    float capillaryB = dot(worldPosition.xz, vec2(13.3, 32.6)) - 1.1 * crossGust - 9.0 * phase;
+                    float capillaryWeight = 1.0 - smoothstep(0.38, 2.0,
+                        max(fwidth(capillaryA), fwidth(capillaryB)));
+                    float gust = 0.58 + 0.42 * sin(dot(worldPosition.xz, vec2(1.4, 2.1)) - phase);
+                    vec2 capillary = (cos(capillaryA) * vec2(0.031, -0.018)
+                        + cos(capillaryB) * vec2(0.012, 0.030))
+                        * capillaryWeight * gust * properties.waveStrength;
+                    vec3 channelNormal = normalize(mix(upward, tangentNormal, 0.72)
+                        + vec3(-capillary.x, 0.0, -capillary.y));
 
                     if (contact < 0.001) {
                         FragColor = vec4(0.0);
@@ -167,6 +220,31 @@
                         vec3 junctionNormal = normalize(vec3(-slope.x, 1.0, -slope.y));
                         normal = normalize(mix(channelNormal, junctionNormal, junctionWeight));
                     }
+                    // Surface-piercing obstacles emit damped, outward-moving elliptical rings.
+                    vec2 contactSlope = vec2(0.0);
+                    for (int i = 0; i < min(properties.obstacleCount, 8); ++i) {
+                        vec4 obstacle = properties.obstacles[i];
+                        vec2 delta = worldPosition.xz - obstacle.xy;
+                        vec2 radii = max(obstacle.zw, vec2(0.035));
+                        float scale = min(radii.x, radii.y);
+                        float range = clamp(0.38 + scale, 0.45, 1.4);
+                        if (any(greaterThanEqual(abs(delta), radii + vec2(range)))) { continue; }
+                        vec2 ellipse = delta / radii;
+                        float radial = length(ellipse);
+                        float clearance = (radial - 1.0) * scale;
+                        if (clearance <= -0.018 || clearance >= range) { continue; }
+                        float envelope = smoothstep(-0.018, 0.055, clearance)
+                            * (1.0 - smoothstep(0.09, range, clearance))
+                            * (1.0 - smoothstep(9.0, 20.0, eyeDistance));
+                        vec2 outward = ellipse / radii * (scale / max(radial, 0.001));
+                        float angle = 6.2831853 * properties.obstaclePhase;
+                        float ring = 0.083 * cos(25.0 * clearance - angle)
+                            + 0.028 * cos(43.0 * clearance - 2.0 * angle + ellipse.x * 0.9);
+                        contactSlope += outward * ring * envelope;
+                    }
+                    if (dot(contactSlope, contactSlope) > 0.0) {
+                        normal = normalize(normal - vec3(contactSlope.x, 0.0, contactSlope.y));
+                    }
                     float grazing = 1.0 - clamp(dot(normal, viewDir), 0.0, 1.0);
                     float grazing2 = grazing * grazing;
                     float fresnel = 0.0204 + 0.9796 * grazing2 * grazing2 * grazing;
@@ -181,7 +259,15 @@
                     float highlight = pow(clamp(dot(reflected, sun), 0.0, 1.0), 105.0);
                     highlight *= smoothstep(0.015, 0.16, sun.y)
                                * mix(0.45 + 0.55 * broadWeight, 1.0, junctionWeight);
-                    vec3 reflection = sky * fresnel * mix(0.09, 1.0, daylight) + vec3(1.0, 0.88, 0.67) * highlight * 0.37;
+                    vec3 reflectedScene = sky * mix(0.09, 1.0, daylight);
+                    float reflectionBudget = clamp(properties.reflectionWeight, 0.0, 1.0)
+                        * smoothstep(0.11, 0.29, fresnel)
+                        * (1.0 - smoothstep(12.0, 24.0, eyeDistance));
+                    if (reflectionBudget > 0.0 && reflected.y > 0.015) {
+                        vec4 hit = traceReflection(worldPosition, reflected);
+                        reflectedScene = mix(reflectedScene, hit.rgb, hit.a * reflectionBudget);
+                    }
+                    vec3 reflection = reflectedScene * fresnel + vec3(1.0, 0.88, 0.67) * highlight * 0.15;
 
                     float absorption = 1.0 - exp(-1.18 * pathLength);
                     vec3 body = mix(vec3(0.088, 0.103, 0.060), vec3(0.019, 0.062, 0.054), absorption) * mix(0.22, 1.0, daylight);
@@ -196,10 +282,16 @@
                             patches = mix(channelPatches,
                                 0.52 + 0.22 * sin(commonA) + 0.14 * sin(commonB), junctionWeight);
                         }
-                        float band = smoothstep(0.012, 0.052, bedDepth)
-                                   * (1.0 - smoothstep(0.065, 0.24, bedDepth));
-                        foam = band * smoothstep(0.57, 0.91, patches)
-                             * mix(0.28 + 0.72 * fineWeight, 0.65, junctionWeight) * properties.foamStrength;
+                        float band = smoothstep(0.012, 0.045, bedDepth)
+                                   * (1.0 - smoothstep(0.082, 0.24, bedDepth));
+                        // Twisted filaments break contacts into small patches and reveal water between them.
+                        float filament = 0.5 + 0.5 * sin(2.3 * ripple + 0.75 * sin(grain)
+                            + dot(worldPosition.xz, vec2(2.8, -4.1)));
+                        float bubbles = 0.5 + 0.5 * sin(capillaryA + 0.8 * sin(capillaryB));
+                        float channelDetail = mix(0.62, filament * (0.58 + 0.42 * bubbles), capillaryWeight);
+                        float detail = mix(channelDetail, 0.65, junctionWeight);
+                        foam = band * smoothstep(0.51, 0.89, patches) * detail
+                             * mix(0.30 + 0.70 * fineWeight, 0.65, junctionWeight) * properties.foamStrength;
                     }
 
                     // Convert premultiplied terms to the forward pass's straight-alpha blend.
@@ -241,7 +333,8 @@
                             float channelCrest = 0.5 + 0.5 * sin(ripple + 0.6 * sin(roll));
                             float sharedCrest = 0.5 + 0.5 * sin(commonA + 0.6 * sin(commonB));
                             float crest = mix(channelCrest, sharedCrest, junctionWeight);
-                            float ridge = crest * crest;
+                            float fold = 0.73 + 0.27 * sin(roll - ripple);
+                            float ridge = crest * crest * mix(fold, 0.86, junctionWeight);
                             bed *= 1.0 + causticWeight * (0.24 * ridge * ridge - 0.047);
                         }
                         vec3 transmission = exp(-vec3(0.88, 0.38, 0.30) * pathLength);

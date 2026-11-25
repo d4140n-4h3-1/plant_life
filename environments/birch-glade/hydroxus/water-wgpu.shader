@@ -20,8 +20,12 @@
                 (name: "foamStrength", kind: Float(value: 0.72)),
                 (name: "waveStrength", kind: Float(value: 1.0)),
                 (name: "sceneColorWeight", kind: Float(value: 0.0)),
+                (name: "reflectionWeight", kind: Float(value: 0.0)),
                 (name: "confluencePhase", kind: Float(value: 0.0)),
                 (name: "confluences", kind: Vector4Array(value: [], max_len: 8)),
+                (name: "obstaclePhase", kind: Float(value: 0.0)),
+                (name: "obstacleCount", kind: Int(value: 0)),
+                (name: "obstacles", kind: Vector4Array(value: [], max_len: 8)),
             ]),
             binding: 2
         ),
@@ -102,6 +106,40 @@
                          / (fyrox_cameraData.zFar - z * fyrox_cameraData.zRange);
                 }
 
+                // Three bounded steps against the opaque depth snapshot, with sky fallback.
+                fn traceReflection(origin: vec3f, direction: vec3f) -> vec4f {
+                    let viewProjection = fyrox_cameraData.viewProjectionMatrix;
+                    let start = viewProjection * vec4f(origin + vec3f(0.0, 0.045, 0.0), 1.0);
+                    let ray = viewProjection * vec4f(direction, 0.0);
+                    let bounds = vec2f(textureDimensions(fyrox_sceneDepth_tex, 0));
+                    var previousUv = vec2f(0.0);
+                    var previousGap = -1.0;
+                    var haveFront = false;
+                    for (var i = 0; i < 3; i += 1) {
+                        let step = array<f32, 3>(0.65, 1.9, 4.4)[i];
+                        let point = start + ray * step;
+                        if (point.w <= 0.001) { break; }
+                        let uv = point.xy / point.w * vec2f(0.5, -0.5) + 0.5;
+                        if (any(uv < vec2f(0.008)) || any(uv > vec2f(0.992))) { break; }
+                        let depth = textureLoad(fyrox_sceneDepth_tex, vec2i(uv * bounds), 0);
+                        let gap = point.w - linearDepth(depth);
+                        if (haveFront && gap >= 0.0) {
+                            let crossing = mix(previousUv, uv, -previousGap / max(gap-previousGap, 0.001));
+                            let border = min(min(crossing.x, crossing.y), min(1.0-crossing.x, 1.0-crossing.y));
+                            let confidence = smoothstep(0.01, 0.13, border)
+                                * (1.0 - smoothstep(0.14, 0.64, gap))
+                                * (1.0 - smoothstep(2.6, 4.8, step));
+                            if (confidence <= 0.0) { break; }
+                            let color = textureSampleLevel(fyrox_sceneColor_tex, fyrox_sceneColor_samp, uv, 0.0).rgb;
+                            return vec4f(color, confidence);
+                        }
+                        previousUv = uv;
+                        previousGap = gap;
+                        haveFront = gap < 0.0;
+                    }
+                    return vec4f(0.0);
+                }
+
                 @fragment fn fs_main(
                     @location(0) uv: vec2f,
                     @location(1) worldPosition: vec3f,
@@ -122,23 +160,37 @@
                     let phase = properties.flowPhase * 6.2831853;
                     let u = uv.x;
                     let v = uv.y;
-                    let bend = sin(u * 0.89 + v * 2.13) * 0.57;
+                    let bend = 0.67 * sin(u * 0.89 + v * 2.13)
+                                    + 0.31 * sin(u * 2.27 - v * 3.41 + phase);
                     let roll = u * 3.05 + v * 2.2 + bend - phase;
                     let ripple = u * 8.4 - v * 3.9 + bend - 3.0 * phase;
                     let grain = u * 16.7 + v * 7.2 - bend - 5.0 * phase;
                     let broadWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(roll));
                     let fineWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(ripple));
                     let grainWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(grain));
-                    let wave = sin(roll) * (0.020 * broadWeight)
-                               + sin(ripple) * (0.009 * fineWeight)
-                               + sin(grain) * (0.003 * grainWeight);
+                    let wave = sin(roll) * (0.014 * broadWeight)
+                               + sin(ripple) * (0.006 * fineWeight)
+                               + sin(grain) * (0.0018 * grainWeight);
 
-                    // Use surface derivatives to tilt the reflection along the curved ribbon.
-                    let bumped = worldPosition + vec3f(0.0, 1.0, 0.0) * (wave * properties.waveStrength);
+                    // Use a level tangent plane so the ribbon's triangle slopes cannot
+                    // imprint stripes on the optical normal.
+                    let farRipple = mix(1.0, 0.18, smoothstep(6.0, 15.0, eyeDistance));
+                    let bumped = vec3f(worldPosition.x, wave * properties.waveStrength * farRipple, worldPosition.z);
                     let gradient = cross(dpdx(bumped), dpdy(bumped));
                     let upward = vec3f(0.0, 1.0, 0.0);
                     let tangentNormal = gradient * sign(gradient.y) / max(length(gradient), 0.0000001);
-                    let channelNormal = normalize(mix(upward, tangentNormal, 0.82));
+                    // World-space capillary waves remain continuous across UV and mesh seams.
+                    let crossGust = sin(dot(worldPosition.xz, vec2f(3.7, -2.8)) - 2.0 * phase);
+                    let capillaryA = dot(worldPosition.xz, vec2f(25.1, -14.2)) + 1.35 * crossGust - 7.0 * phase;
+                    let capillaryB = dot(worldPosition.xz, vec2f(13.3, 32.6)) - 1.1 * crossGust - 9.0 * phase;
+                    let capillaryWeight = 1.0 - smoothstep(0.38, 2.0,
+                        max(fwidth(capillaryA), fwidth(capillaryB)));
+                    let gust = 0.58 + 0.42 * sin(dot(worldPosition.xz, vec2f(1.4, 2.1)) - phase);
+                    let capillary = (cos(capillaryA) * vec2f(0.031, -0.018)
+                        + cos(capillaryB) * vec2f(0.012, 0.030))
+                        * capillaryWeight * gust * properties.waveStrength;
+                    let channelNormal = normalize(mix(upward, tangentNormal, 0.72)
+                        + vec3f(-capillary.x, 0.0, -capillary.y));
 
                     if (contact < 0.001) {
                         return vec4f(0.0);
@@ -167,6 +219,31 @@
                         let junctionNormal = normalize(vec3f(-slope.x, 1.0, -slope.y));
                         normal = normalize(mix(channelNormal, junctionNormal, junctionWeight));
                     }
+                    // Surface-piercing obstacles emit damped, outward-moving elliptical rings.
+                    var contactSlope = vec2f(0.0);
+                    for (var i = 0; i < min(properties.obstacleCount, 8); i += 1) {
+                        let obstacle = properties.obstacles[i];
+                        let delta = worldPosition.xz - obstacle.xy;
+                        let radii = max(obstacle.zw, vec2f(0.035));
+                        let scale = min(radii.x, radii.y);
+                        let range = clamp(0.38 + scale, 0.45, 1.4);
+                        if (any(abs(delta) >= radii + vec2f(range))) { continue; }
+                        let ellipse = delta / radii;
+                        let radial = length(ellipse);
+                        let clearance = (radial - 1.0) * scale;
+                        if (clearance <= -0.018 || clearance >= range) { continue; }
+                        let envelope = smoothstep(-0.018, 0.055, clearance)
+                            * (1.0 - smoothstep(0.09, range, clearance))
+                            * (1.0 - smoothstep(9.0, 20.0, eyeDistance));
+                        let outward = ellipse / radii * (scale / max(radial, 0.001));
+                        let angle = 6.2831853 * properties.obstaclePhase;
+                        let ring = 0.083 * cos(25.0 * clearance - angle)
+                            + 0.028 * cos(43.0 * clearance - 2.0 * angle + ellipse.x * 0.9);
+                        contactSlope += outward * ring * envelope;
+                    }
+                    if (dot(contactSlope, contactSlope) > 0.0) {
+                        normal = normalize(normal - vec3f(contactSlope.x, 0.0, contactSlope.y));
+                    }
                     let grazing = 1.0 - clamp(dot(normal, viewDir), 0.0, 1.0);
                     let grazing2 = grazing * grazing;
                     let fresnel = 0.0204 + 0.9796 * grazing2 * grazing2 * grazing;
@@ -181,7 +258,15 @@
                     var highlight = pow(clamp(dot(reflected, sun), 0.0, 1.0), 105.0);
                     highlight *= smoothstep(0.015, 0.16, sun.y)
                                * mix(0.45 + 0.55 * broadWeight, 1.0, junctionWeight);
-                    let reflection = sky * fresnel * mix(0.09, 1.0, daylight) + vec3f(1.0, 0.88, 0.67) * highlight * 0.37;
+                    var reflectedScene = sky * mix(0.09, 1.0, daylight);
+                    let reflectionBudget = clamp(properties.reflectionWeight, 0.0, 1.0)
+                        * smoothstep(0.11, 0.29, fresnel)
+                        * (1.0 - smoothstep(12.0, 24.0, eyeDistance));
+                    if (reflectionBudget > 0.0 && reflected.y > 0.015) {
+                        let hit = traceReflection(worldPosition, reflected);
+                        reflectedScene = mix(reflectedScene, hit.rgb, hit.a * reflectionBudget);
+                    }
+                    let reflection = reflectedScene * fresnel + vec3f(1.0, 0.88, 0.67) * highlight * 0.15;
 
                     let absorption = 1.0 - exp(-1.18 * pathLength);
                     let body = mix(vec3f(0.088, 0.103, 0.060), vec3f(0.019, 0.062, 0.054), absorption) * mix(0.22, 1.0, daylight);
@@ -196,10 +281,16 @@
                             patches = mix(channelPatches,
                                 0.52 + 0.22 * sin(commonA) + 0.14 * sin(commonB), junctionWeight);
                         }
-                        let band = smoothstep(0.012, 0.052, bedDepth)
-                                   * (1.0 - smoothstep(0.065, 0.24, bedDepth));
-                        foam = band * smoothstep(0.57, 0.91, patches)
-                             * mix(0.28 + 0.72 * fineWeight, 0.65, junctionWeight) * properties.foamStrength;
+                        let band = smoothstep(0.012, 0.045, bedDepth)
+                                   * (1.0 - smoothstep(0.082, 0.24, bedDepth));
+                        // Twisted filaments break contacts into small patches and reveal water between them.
+                        let filament = 0.5 + 0.5 * sin(2.3 * ripple + 0.75 * sin(grain)
+                            + dot(worldPosition.xz, vec2f(2.8, -4.1)));
+                        let bubbles = 0.5 + 0.5 * sin(capillaryA + 0.8 * sin(capillaryB));
+                        let channelDetail = mix(0.62, filament * (0.58 + 0.42 * bubbles), capillaryWeight);
+                        let detail = mix(channelDetail, 0.65, junctionWeight);
+                        foam = band * smoothstep(0.51, 0.89, patches) * detail
+                             * mix(0.30 + 0.70 * fineWeight, 0.65, junctionWeight) * properties.foamStrength;
                     }
 
                     // Convert premultiplied terms to the forward pass's straight-alpha blend.
@@ -241,7 +332,8 @@
                             let channelCrest = 0.5 + 0.5 * sin(ripple + 0.6 * sin(roll));
                             let sharedCrest = 0.5 + 0.5 * sin(commonA + 0.6 * sin(commonB));
                             let crest = mix(channelCrest, sharedCrest, junctionWeight);
-                            let ridge = crest * crest;
+                            let fold = 0.73 + 0.27 * sin(roll - ripple);
+                            let ridge = crest * crest * mix(fold, 0.86, junctionWeight);
                             bed *= 1.0 + causticWeight * (0.24 * ridge * ridge - 0.047);
                         }
                         let transmission = exp(-vec3f(0.88, 0.38, 0.30) * pathLength);

@@ -43,7 +43,7 @@ index 8872fed..a6b9a70 100644
              },
          )?;
 diff --git a/fyrox-impl/src/renderer/mod.rs b/fyrox-impl/src/renderer/mod.rs
-index 916adaf..9336c69 100644
+index 916adaf..95c2a70 100644
 --- a/fyrox-impl/src/renderer/mod.rs
 +++ b/fyrox-impl/src/renderer/mod.rs
 @@ -221,4 +221,7 @@ pub struct RenderDataContainer {
@@ -89,7 +89,7 @@ index 916adaf..9336c69 100644
 +
      /// Returns high-dynamic range frame buffer texture.
      pub fn hdr_scene_frame_texture(&self) -> &GpuTexture {
-@@ -1317,4 +1345,40 @@ impl Renderer {
+@@ -1317,4 +1345,45 @@ impl Renderer {
          {
              let _debug_scope = server.begin_scope("ForwardRendering");
 +            let needs_opaque_color = bundle_storage.bundles.iter().any(|bundle| {
@@ -108,14 +108,19 @@ index 916adaf..9336c69 100644
 +                        .iter()
 +                        .any(|resource| resource.name.as_str() == "fyrox_sceneColor")
 +                });
-+                // A material that samples scene color may explicitly opt out of a capture.
++                // Materials with explicit weights can opt out of the copy.
 +                requests_snapshot
-+                    && material
-+                        .property_group_ref("properties")
-+                        .and_then(|properties| properties.property_ref("sceneColorWeight"))
-+                        .and_then(|weight| weight.as_float())
-+                        .unwrap_or(1.0)
-+                        > 0.0
++                    && material.property_group_ref("properties").is_none_or(|properties| {
++                        let refraction = properties
++                            .property_ref("sceneColorWeight")
++                            .and_then(|weight| weight.as_float());
++                        let reflection = properties
++                            .property_ref("reflectionWeight")
++                            .and_then(|weight| weight.as_float());
++                        (refraction.is_none() && reflection.is_none())
++                            || refraction.unwrap_or(0.0) > 0.0
++                            || reflection.unwrap_or(0.0) > 0.0
++                    })
 +            });
 +            let opaque_color = if needs_opaque_color {
 +                Some(RenderDataContainer::capture_opaque_color(
@@ -130,7 +135,7 @@ index 916adaf..9336c69 100644
 +            };
 
              render_data.statistics += bundle_storage.render_to_frame_buffer(
-@@ -1336,4 +1400,5 @@ impl Renderer {
+@@ -1336,4 +1405,5 @@ impl Renderer {
                      ambient_light: scene.rendering_options.ambient_lighting_color,
                      scene_depth: Some(depth),
 +                    scene_color: opaque_color.as_ref(),

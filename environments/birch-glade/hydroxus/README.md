@@ -20,13 +20,34 @@ each during the game update. The last argument sets the ripple phase cycles per
 second. The shader samples the opaque scene depth to keep the water clear over
 shallow gravel and increase absorption in deeper sections. Layered ripples tilt
 the reflected sky and highlight, with broken foam in narrow bands where the
-water meets banks and submerged rocks. The reflection is a procedural sky
-gradient. The water mesh stays fixed.
+water meets banks and submerged rocks. The water mesh stays fixed. A level optical normal keeps triangles in the
+water ribbon from imprinting their slopes on the reflected highlights.
 
 For a day/night cycle, call `set_sun_direction` with the world-space vector from
 the water toward the sun. Supply the directional light's world-space +Y axis
 when using Wilderness's convention. The material expects opaque terrain and rocks
 to write depth before the forward water pass, and uses perspective camera depth.
+
+## Obstacle ripples
+
+Pass the world-space bounds of obstacle meshes or colliders to each liquid
+controller. Refresh the bounds after physics updates for moving objects.
+The controller caches the liquid triangles when attached, tests a few vertical
+segments through each obstacle against that surface, and keeps up to eight
+contacts nearest the viewer. Objects entirely above or below the sampled
+surface do not emit ripples.
+
+```rust
+river.update_obstacles(river_mesh, &obstacle_world_bounds, camera_position);
+river.update(context.dt);
+```
+
+Call the same methods for ponds, springs, and other horizontal liquid surfaces.
+The footprint of each ripple is an ellipse fitted to the obstacle bounds.
+The outward-moving rings animate independently of the current and affect
+both the surface highlight and the refraction. They fade with distance and
+use no additional texture samples. This is a visual contact response and
+does not apply buoyancy or change rigid-body motion.
 
 ## Ponds and springs
 
@@ -58,9 +79,9 @@ To refract the lit riverbed and submerged rocks, apply the
 [opaque scene-color patch](opaque-scene-color.patch) to Hydroxus at
 `63b5452ff361c0b5d30a65cfbf485e1267eaf935`. Run `git apply` with that
 file from the Hydroxus checkout. The renderer takes one HDR color snapshot
-per view before the forward pass when a visible material requests it and its
-`sceneColorWeight` is positive. Materials that omit that property keep the
-default scene-color capture behavior.
+per view before the forward pass when a visible material requests it and either its
+`sceneColorWeight` or `reflectionWeight` is positive. Materials with neither
+weight keep the default scene-color capture behavior.
 
 Point Wilderness and its graphics dependency at the same patched checkout.
 For a local test, add this to the Wilderness workspace manifest, adjusting
@@ -95,11 +116,34 @@ same current waves as the surface. Foam is evaluated only in shallow contact
 bands, and shared waves are evaluated only near configured confluences.
 The sun direction also dims the procedural reflection and foam at night.
 
-In a 960 × 540 offscreen software Vulkan test containing banks, shallows,
-deep water, and a confluence, the median draw dropped from 16.98 ms to
-12.64 ms with refraction enabled and from 12.60 ms to 5.28 ms with it disabled.
-The test isolates the water draw and excludes the HDR snapshot and other
-Wilderness rendering.
+### Close-up surface detail
+
+World-space fine ripples break up the highlight independently of the channel
+mesh, with varying strength across the surface. The ripples are filtered
+against their projected pixel size to reduce shimmer. Foam uses broken
+filaments inside the existing shallow contact band, and the small caustic
+variation reuses the bed sample. The detail adds no texture reads to the
+reflection or refraction paths. Use `set_surface_activity` to soften ripples
+and foam in calmer water.
+
+### Nearby reflections
+
+With the same renderer patch, opt in to nearby scenery reflections. Calm
+surfaces make the strongest use of this effect:
+
+```rust
+river.set_reflection_strength(0.55);
+stream.set_reflection_strength(0.35);
+spring.set_reflection_strength(0.60);
+pond.set_reflection_strength(0.78);
+```
+
+The reflection path shares the refraction snapshot. It uses at most three
+depth lookups over 4.4 m and one color lookup on a hit. It fades out with
+camera distance, view angle, weak intersections, and proximity to a screen
+edge. Misses fall back to the procedural sky. A strength of zero skips the
+trace and is the default. Geometry outside the current camera frame is not
+available for this effect.
 
 ## Joining water surfaces
 
