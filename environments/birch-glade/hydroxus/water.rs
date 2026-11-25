@@ -52,6 +52,7 @@ impl FlowingWater {
         let current = ((cycles_per_second.abs() - 0.06) / 0.34).clamp(0.0, 1.0)
             * cycles_per_second.signum();
         water_material.set_property("obstacleCurrent", current);
+        water_material.set_property("bankRippleStrength", current.abs());
         let material = MaterialResource::new_ok(
             Uuid::new_v4(),
             ResourceKind::Embedded,

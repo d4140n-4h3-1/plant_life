@@ -74,7 +74,7 @@ def carve_channel(terrain, group, name, source, width, depth, shore_rng, join=No
             raise RuntimeError("The tributary route did not reach the river")
         scene.hxr_steps = steps
     existing = set(bpy.data.objects)
-    if bpy.ops.hx.river(build_bed=False) != {"FINISHED"}:
+    if bpy.ops.hx.river(build_bed=False, smooth_path=join is not None) != {"FINISHED"}:
         raise RuntimeError(f"Hydroxus failed to carve {name}")
     water, = set(bpy.data.objects) - existing
     water.name = name
@@ -89,21 +89,23 @@ def carve_channel(terrain, group, name, source, width, depth, shore_rng, join=No
     mesh = water.data
     centers = [(mesh.vertices[i].co + mesh.vertices[i + 1].co) / 2
                for i in range(0, len(mesh.vertices), 2)]
-    # Average the grid-sized steps before recomputing the ribbon edges.
-    smooth = [centers[0]]
-    for i in range(1, len(centers) - 1):
-        neighbors = centers[max(0, i - 3):i + 4]
-        smooth.append(sum(neighbors, Vector()) / len(neighbors))
-    smooth.append(centers[-1])
+    # The stream already uses the same smoothed route for its bed and ribbon.
+    if join is None:
+        smooth = [centers[0]]
+        for i in range(1, len(centers) - 1):
+            neighbors = centers[max(0, i - 3):i + 4]
+            smooth.append(sum(neighbors, Vector()) / len(neighbors))
+        smooth.append(centers[-1])
+        centers = smooth
     # Each bank gets independent, spatially coherent variations at three scales.
     phases = [[shore_rng.uniform(0, tau) for _ in range(3)] for _ in range(2)]
     sections = []
     distance = 0.0
-    for i, center in enumerate(smooth):
-        tangent = smooth[min(i + 1, len(smooth) - 1)] - smooth[max(i - 1, 0)]
+    for i, center in enumerate(centers):
+        tangent = centers[min(i + 1, len(centers) - 1)] - centers[max(i - 1, 0)]
         lateral = Vector((-tangent.y, tangent.x, 0)).normalized()
         if i:
-            distance += (center.xy - smooth[i - 1].xy).length
+            distance += (center.xy - centers[i - 1].xy).length
         bank_widths = tuple(
             width * (0.49 + 0.075 * sin(0.86 * distance + broad)
                      + 0.038 * sin(1.74 * distance + middle)
@@ -139,30 +141,52 @@ def shape_banks(terrain, channels):
             _, index, separation = tree.find(Vector((point.x, point.y, 0)))
             if separation > 2.7:
                 continue
-            a = sections[max(0, index - 1)]
-            b = sections[min(len(sections) - 1, index + 1)]
-            span = b[0].xy - a[0].xy
-            if span.length_squared < 1.0e-8:
+            # Project onto an actual ribbon segment. A chord across both
+            # neighbors cuts the corner and shifts abruptly at the next sample.
+            closest = None
+            for first in range(max(0, index - 1), min(index + 1, len(sections) - 1)):
+                a, b = sections[first:first + 2]
+                span = b[0].xy - a[0].xy
+                if span.length_squared < 1.0e-8:
+                    continue
+                t = min(1.0, max(0.0, (point.xy - a[0].xy).dot(span) / span.length_squared))
+                center = a[0].lerp(b[0], t)
+                distance = (point.xy - center.xy).length_squared
+                if closest is None or distance < closest[0]:
+                    closest = (distance, a, b, t, center)
+            if closest is None:
                 continue
-            t = min(1.0, max(0.0, (point.xy - a[0].xy).dot(span) / span.length_squared))
-            center = a[0].lerp(b[0], t)
+            distance, a, b, t, center = closest
             lateral = a[1].lerp(b[1], t).normalized()
             cross = (point - center).dot(lateral)
             side = int(cross >= 0)
             width = a[2][side] + t * (b[2][side] - a[2][side])
-            offset = abs(cross) - width
+            offset = distance ** 0.5 - width
             # The gradual approach on the wet side creates shallow gravel shelves.
             if not -0.72 < offset < 0.73:
                 if offset <= -0.72:
-                    targets.append(min(original, center.z - 0.28))
+                    targets.append((offset, min(0.0, center.z - 0.28 - original)))
                 continue
             influence = min(1.0, (offset + 0.72) / 0.44, (0.73 - offset) / 0.43)
             along = a[3] + t * (b[3] - a[3])
             influence *= min(1.0, along / 0.7, (sections[-1][3] - along) / 0.7)
             profile = center.z + offset * (0.37 if offset < 0 else 0.52)
-            targets.append(original + (profile - original) * influence)
+            if influence > 0:
+                targets.append((offset, (profile - original) * influence))
         if targets:
-            point.z = min(targets)
+            # Let a shelf rise along dry land, tapering it away where the other
+            # channel is wet so it cannot form a lip across the confluence.
+            lowering = min(0.0, *(change for _, change in targets))
+            raising = 0.0
+            for index, (_, change) in enumerate(targets):
+                if change <= 0.0:
+                    continue
+                for other, (offset, _) in enumerate(targets):
+                    if other != index:
+                        t = min(1.0, max(0.0, (offset + 0.2) / 0.4))
+                        change *= t * t * (3.0 - 2.0 * t)
+                raising = max(raising, change)
+            point.z = original + lowering + raising
     terrain.data.update()
 
 

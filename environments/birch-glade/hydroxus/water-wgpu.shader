@@ -16,6 +16,7 @@
             name: "properties",
             kind: PropertyGroup([
                 (name: "flowPhase", kind: Float(value: 0.0)),
+                (name: "bankRippleStrength", kind: Float(value: 0.0)),
                 (name: "sunDirection", kind: Vector3(value: (-0.4234, 0.7460, -0.5141))),
                 (name: "foamStrength", kind: Float(value: 0.72)),
                 (name: "waveStrength", kind: Float(value: 1.0)),
@@ -131,7 +132,7 @@
                                 * (1.0 - smoothstep(0.14, 0.64, gap))
                                 * (1.0 - smoothstep(2.6, 4.8, step));
                             if (confidence <= 0.0) { break; }
-                            let color = textureSampleLevel(fyrox_sceneColor_tex, fyrox_sceneColor_samp, uv, 0.0).rgb;
+                            let color = textureSampleLevel(fyrox_sceneColor_tex, fyrox_sceneColor_samp, crossing, 0.0).rgb;
                             return vec4f(color, confidence);
                         }
                         previousUv = uv;
@@ -169,7 +170,14 @@
                     let broadWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(roll));
                     let fineWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(ripple));
                     let grainWeight = 1.0 - smoothstep(0.65, 2.7, fwidth(grain));
-                    let wave = sin(roll) * (0.014 * broadWeight)
+                    // Shallow depth contours follow the visible banks, including curves in the bed.
+                    let bankPhase = 115.0 * bedDepth - 1.8 * u + 2.0 * phase;
+                    let bankBand = smoothstep(0.008, 0.026, bedDepth)
+                                 * (1.0 - smoothstep(0.075, 0.17, bedDepth));
+                    let bankDetail = 1.0 - smoothstep(0.55, 2.5, fwidth(bankPhase));
+                    let bankRipple = 0.0018 * properties.bankRippleStrength * bankBand * bankDetail
+                                   * sin(bankPhase + 0.55 * bend);
+                    let wave = bankRipple + sin(roll) * (0.014 * broadWeight)
                                + sin(ripple) * (0.006 * fineWeight)
                                + sin(grain) * (0.0018 * grainWeight);
 

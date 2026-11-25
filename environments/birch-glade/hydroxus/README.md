@@ -22,6 +22,10 @@ shallow gravel and increase absorption in deeper sections. Layered ripples tilt
 the reflected sky and highlight, with broken foam in narrow bands where the
 water meets banks and submerged rocks. The water mesh stays fixed. A level optical normal keeps triangles in the
 water ribbon from imprinting their slopes on the reflected highlights.
+Flowing channels also get small ripples that follow shallow depth contours
+along the banks. These reuse the existing depth sample and fade where their
+spacing becomes too fine to resolve. The attachment phase rate controls their
+strength, with still water at or below 0.06 cycles per second.
 
 For a day/night cycle, call `set_sun_direction` with the world-space vector from
 the water toward the sun. Supply the directional light's world-space +Y axis

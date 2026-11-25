@@ -25,6 +25,21 @@ def downhill(points, adjacency, start, limit):
         route.append(max(candidates)[1])
     return route
 
+
+def smooth_channel_path(path):
+    """Round grid turns and ease grade changes while keeping the endpoints."""
+    smoothed = []
+    for i in range(len(path)):
+        radius = min(4, i, len(path) - 1 - i)
+        weights = [radius + 1 - abs(offset) for offset in range(-radius, radius + 1)]
+        center = sum((sample * weight for sample, weight in
+                      zip(path[i - radius:i + radius + 1], weights)), Vector()) / sum(weights)
+        if smoothed:
+            center.z = min(smoothed[-1].z, max(path[-1].z, center.z))
+        smoothed.append(center)
+    return smoothed
+
+
 def set_water_uv(water):
     """Write downstream and cross-channel distances in meters to TEXCOORD_0."""
     mesh = water.data
@@ -241,6 +256,7 @@ def dress_channel_beds(terrain, waterways, seed, collection):
 class HX_OT_river(bpy.types.Operator):
     bl_idname="hx.river"; bl_label="Trace River and Bed from 3D Cursor"; bl_options={'REGISTER','UNDO'}
     build_bed: BoolProperty(default=True, options={'HIDDEN'})
+    smooth_path: BoolProperty(name='Smooth Channel Turns', default=False)
 
     @classmethod
     def poll(cls,c):
@@ -261,6 +277,8 @@ class HX_OT_river(bpy.types.Operator):
         if len(route)<2:
             self.report({'WARNING'},'Source is in a depression or on flat terrain'); return {'CANCELLED'}
         path=[points[i].copy() for i in route]
+        if self.smooth_path:
+            path = smooth_channel_path(path)
         width=s.hxr_width; depth=s.hxr_depth
         tree=KDTree(len(points))
         for i,p in enumerate(points): tree.insert(Vector((p.x,p.y,0)),i)
