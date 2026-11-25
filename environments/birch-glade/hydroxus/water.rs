@@ -49,6 +49,9 @@ impl FlowingWater {
         let mut water_material = Material::from_shader(shader);
         water_material.set_property("sceneColorWeight", 0.0_f32);
         water_material.set_property("reflectionWeight", 0.0_f32);
+        let current = ((cycles_per_second.abs() - 0.06) / 0.34).clamp(0.0, 1.0)
+            * cycles_per_second.signum();
+        water_material.set_property("obstacleCurrent", current);
         let material = MaterialResource::new_ok(
             Uuid::new_v4(),
             ResourceKind::Embedded,
@@ -132,6 +135,13 @@ impl FlowingWater {
     pub fn set_confluence_time(&self, elapsed_seconds: f32) {
         let phase = (elapsed_seconds * 0.28).rem_euclid(1.0);
         self.material.data_ref().set_property("confluencePhase", phase);
+    }
+
+    /// Override the ripple deformation along FlowUV's U axis. Zero is still water.
+    pub fn set_obstacle_current(&self, current: f32) {
+        self.material
+            .data_ref()
+            .set_property("obstacleCurrent", current.clamp(-1.0, 1.0));
     }
 
     /// Refresh contact ripples using world-space obstacle or collider bounds.

@@ -44,9 +44,17 @@ river.update(context.dt);
 
 Call the same methods for ponds, springs, and other horizontal liquid surfaces.
 The footprint of each ripple is an ellipse fitted to the obstacle bounds.
-The outward-moving rings animate independently of the current and affect
-both the surface highlight and the refraction. They fade with distance and
-use no additional texture samples. This is a visual contact response and
+The rings affect both highlights and refraction. They stay anchored at the
+obstacle and stretch downstream along increasing `FlowUV.u`, with closer
+spacing upstream. Distortion eases at a confluence where the channels'
+directions change. Slow pond settings leave the rings symmetric.
+
+The controller infers a default current strength from its signed phase rate
+and treats rates up to 0.06 cycles per second as still water for obstacle
+ripples. Call `set_obstacle_current` with a value from −1 to 1 to set the
+stretch independently. Zero gives symmetric rings, and a negative value
+reverses the current. Ripple propagation continues even at zero current.
+The effect fades with distance and uses no additional texture samples. This is a visual contact response and
 does not apply buoyancy or change rigid-body motion.
 
 ## Ponds and springs

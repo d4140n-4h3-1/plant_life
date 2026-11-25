@@ -26,6 +26,7 @@
                 (name: "obstaclePhase", kind: Float(value: 0.0)),
                 (name: "obstacleCount", kind: Int(value: 0)),
                 (name: "obstacles", kind: Vector4Array(value: [], max_len: 8)),
+                (name: "obstacleCurrent", kind: Float(value: 0.0)),
             ]),
             binding: 2
         ),
@@ -176,7 +177,15 @@
                     // imprint stripes on the optical normal.
                     float farRipple = mix(1.0, 0.18, smoothstep(6.0, 15.0, eyeDistance));
                     vec3 bumped = vec3(worldPosition.x, wave * properties.waveStrength * farRipple, worldPosition.z);
-                    vec3 gradient = cross(dFdx(bumped), dFdy(bumped));
+                    vec3 surfaceDx = dFdx(bumped);
+                    vec3 surfaceDy = dFdy(bumped);
+                    vec3 gradient = cross(surfaceDx, surfaceDy);
+                    // Recover the horizontal direction of increasing downstream U.
+                    float uDx = dFdx(u);
+                    float uDy = dFdy(u);
+                    vec2 along = vec2(uDx * surfaceDy.z - uDy * surfaceDx.z,
+                        surfaceDx.x * uDy - surfaceDy.x * uDx) * sign(-gradient.y);
+                    vec2 flow = along * (properties.obstacleCurrent / max(length(along), 0.00000001));
                     vec3 upward = vec3(0.0, 1.0, 0.0);
                     vec3 tangentNormal = gradient * sign(gradient.y) / max(length(gradient), 0.0000001);
                     // World-space capillary waves remain continuous across UV and mesh seams.
@@ -228,10 +237,16 @@
                         vec2 radii = max(obstacle.zw, vec2(0.035));
                         float scale = min(radii.x, radii.y);
                         float range = clamp(0.38 + scale, 0.45, 1.4);
-                        if (any(greaterThanEqual(abs(delta), radii + vec2(range)))) { continue; }
+                        if (any(greaterThanEqual(abs(delta), radii + vec2(range * 1.95)))) { continue; }
                         vec2 ellipse = delta / radii;
                         float radial = length(ellipse);
-                        float clearance = (radial - 1.0) * scale;
+                        float distanceFromObstacle = (radial - 1.0) * scale;
+                        float heading = dot(delta, flow) / max(length(delta), 0.001)
+                            * (1.0 - junctionWeight);
+                        // Keep the wave anchored to the contact ellipse while changing its spacing.
+                        float stretch = 1.0 + 0.95 * max(heading, 0.0)
+                            + 0.26 * min(heading, 0.0);
+                        float clearance = distanceFromObstacle / stretch;
                         if (clearance <= -0.018 || clearance >= range) { continue; }
                         float envelope = smoothstep(-0.018, 0.055, clearance)
                             * (1.0 - smoothstep(0.09, range, clearance))
@@ -240,7 +255,7 @@
                         float angle = 6.2831853 * properties.obstaclePhase;
                         float ring = 0.083 * cos(25.0 * clearance - angle)
                             + 0.028 * cos(43.0 * clearance - 2.0 * angle + ellipse.x * 0.9);
-                        contactSlope += outward * ring * envelope;
+                        contactSlope += outward * ring * envelope / stretch;
                     }
                     if (dot(contactSlope, contactSlope) > 0.0) {
                         normal = normalize(normal - vec3(contactSlope.x, 0.0, contactSlope.y));
