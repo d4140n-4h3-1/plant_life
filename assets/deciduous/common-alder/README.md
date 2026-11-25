@@ -8,6 +8,8 @@
 - [512 × 512 texture maps](textures/)
 - [Studio preview](renders/common-alder-full.png)
 
+The bark maps come from Poly Haven’s [Bark Brown 02](https://polyhaven.com/a/bark_brown_02), by Rob Tuytel, released under CC0. Resized source maps are included in [source](source/).
+
 ## Build
 
 From the repository root, use Blender 4.3.

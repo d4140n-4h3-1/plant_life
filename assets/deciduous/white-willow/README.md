@@ -8,6 +8,8 @@
 - [512 × 512 texture maps](textures/)
 - [Studio preview](renders/white-willow-full.png)
 
+The bark maps come from Poly Haven’s [Bark Willow](https://polyhaven.com/a/bark_willow), photographed by Dimitrios Savva and processed by Dario Barresi, released under CC0. Resized source maps are included in [source](source/).
+
 ## Build
 
 From the repository root, use Blender 4.3.

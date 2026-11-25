@@ -2,6 +2,7 @@
 from math import cos, exp, pi, sin, tau
 from random import Random
 
+import bpy
 import numpy as np
 from mathutils import Vector
 
@@ -9,17 +10,27 @@ from build_birch_heather import ASSETS, BranchMesh, SIZE, UP, atlas, finish, mai
 
 
 def bark_maps(willow):
-    y, x = np.mgrid[:SIZE, :SIZE] / SIZE
-    channels = 15 if willow else 23
-    drift = .26 * np.sin(tau * (2*y + 3*x)) + .11 * np.sin(tau * (7*y - 3*x))
-    folds = (.5 + .5 * np.cos(tau * (channels*x + drift))) ** 3
-    plates = .5 + .5 * np.sin(tau * (5*y + 4*x + .3*np.sin(tau*7*x)))
-    grain = np.random.default_rng(52).random(x.shape)
-    relief = .29 + .37*folds + .14*plates + .04*grain
-    dark = np.array((.27,.25,.19) if willow else (.19,.16,.125))
-    light = np.array((.57,.54,.43) if willow else (.43,.36,.28))
-    color = dark + (light - dark)*(.14+.77*relief)[..., None]
-    return color, relief, .85+.12*folds, .78+.20*folds, 2.1
+    """Load the tileable photographic bark maps bundled with each tree."""
+    slug = "white-willow" if willow else "common-alder"
+    source = ASSETS / "deciduous" / slug / "source"
+
+    def read_map(kind):
+        image = bpy.data.images.load(str(source / f"bark-{kind}.jpg"))
+        try:
+            image.colorspace_settings.name = "Non-Color"
+            if tuple(image.size) != (SIZE, SIZE):
+                raise ValueError(f"Expected a {SIZE} × {SIZE} bark map: {image.filepath}")
+            pixels = np.empty(SIZE * SIZE * 4, dtype=np.float32)
+            image.pixels.foreach_get(pixels)
+            return pixels.reshape(SIZE, SIZE, 4)[::-1]
+        finally:
+            bpy.data.images.remove(image)
+
+    color = read_map("diff")[..., :3]
+    if not willow:
+        color = color * np.array((.83, .80, .77))
+    return (color, read_map("disp")[..., 0], read_map("rough")[..., 0],
+            read_map("ao")[..., 0], 3.2)
 
 
 def tree_mesh(maps, seed, willow):
