@@ -26,7 +26,9 @@ def atlas(kind):
     rose=kind=="rose"
     oak=kind=="oak"
     hawthorn=kind=="hawthorn"
-    birch=kind in ("leaves","rowan","rose","oak","hawthorn")
+    alder=kind=="alder"
+    willow=kind=="willow"
+    birch=kind in ("leaves","rowan","rose","oak","hawthorn","alder","willow")
     broom=kind in ("broom-leaves","broom-flowers")
     rgba[..., :3]=(.19,.32,.11) if kind!="blossoms" else (.43,.23,.33)
     if kind=="broom-flowers":
@@ -51,7 +53,13 @@ def atlas(kind):
         lateral=abs((x-start[0])*d[1]-(y-start[1])*d[0])/length
         if leaf:
             rim=width*np.sin(np.pi*q)**.83*(1.23-.47*q)
-            if oak or hawthorn:
+            if alder:
+                rim=width*np.sin(np.pi*q)**.52*(.82+.35*q)
+                rim-=width*.17*np.exp(-((q-.90)/.10)**2)
+                rim+=.9*np.cos(14*tau*q)*np.sin(np.pi*q)
+            elif willow:
+                rim=width*np.sin(np.pi*q)**1.15*(1.15-.35*q)
+            elif oak or hawthorn:
                 pairs=4.4 if oak else 3
                 rim*=.75+.25*np.cos(tau*q*pairs)
             else:
@@ -93,7 +101,14 @@ def atlas(kind):
                 heading=direction*rng.uniform(.25,.75)+sign*lateral*rng.uniform(.65,1.07)
                 palette=(.198,.349,.09) if oak else (.285,.416,.105) if hawthorn else (.25,.375,.121) if rose else (.246,.433,.126)
                 color=np.array(palette)*rng.uniform(.78,1.25)
-                mark(p,p+heading*blade,blade*(.36 if rose else .28 if rowan else .43),color,leaf=True)
+                if willow:
+                    blade *= 1.3
+                    heading=direction*.76+sign*lateral*rng.uniform(.30,.64)
+                    color=np.array((.34,.46,.26))*rng.uniform(.84,1.18)
+                elif alder:
+                    color=np.array((.19,.33,.10))*rng.uniform(.84,1.18)
+                ratio=.12 if willow else .50 if alder else .36 if rose else .28 if rowan else .43
+                mark(p,p+heading*blade,blade*ratio,color,leaf=True)
             elif broom:
                 p=p+sign*lateral*3
                 if kind=="broom-leaves" or i%4==0:

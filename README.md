@@ -164,6 +164,14 @@ A deciduous tree with pinnate foliage and red-orange berries. See the [rowan ass
 
 A broad deciduous crown on a thick trunk with spreading limbs. See the [English oak asset and generator](assets/deciduous/english-oak/README.md).
 
+### Common alder
+
+An upright stream-bank tree with rounded, dark-green leaves and dark fissured bark. See the [common alder asset and generator](assets/deciduous/common-alder/README.md).
+
+### White willow
+
+A spreading stream-bank tree with narrow, pale-green leaves on drooping outer twigs. See the [white willow asset and generator](assets/deciduous/white-willow/README.md).
+
 ## Shrubs
 
 ### Bilberry
