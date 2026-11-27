@@ -253,3 +253,21 @@ its bloom window, and scatters fallen broad leaves around trees. These
 geometry changes are baked into snapshots. Each deciduous spray reaches its
 peak gold or amber tint at least eight days before it drops. The deciduous
 crowns are bare by December 1. Spruce keeps its needles.
+
+## Weather presets
+
+The Birch Glade builder accepts `--weather clear`, `--weather rain`, and
+`--weather snow`. Weather and `--day-of-year` are independent so the same
+date can be previewed under different conditions.
+
+```sh
+blender --background --python-exit-code 1 \
+  --python environments/birch-glade/tools/build_birch_glade.py -- \
+  --weather snow --day-of-year 335 --render
+```
+
+Rain darkens the loam's vertex colors. Snow adds a patchy ground layer that
+favors gentle slopes and skips the wet channel. Surface changes are included in
+the GLB. The Blender scene adds overcast lighting and two looping layers of
+precipitation. For live weather, a Hydroxus project can use these scenes as
+references for its own weather controller and moving particle volume.

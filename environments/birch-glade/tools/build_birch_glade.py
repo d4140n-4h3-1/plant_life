@@ -21,6 +21,7 @@ from hydroxus_water_join import join_water_channels
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from seasonal_materials import apply_blender
 from seasonal_growth import add_litter, apply_growth
+from weather import PRESETS, apply_atmosphere, apply_ground
 
 
 BANK_GRASSES = {
@@ -338,7 +339,7 @@ def add_outer_ground(group, material):
         group.objects.link(bpy.data.objects.new(name, mesh))
 
 
-def build(shore_seed, output, render=False, day_of_year=None):
+def build(shore_seed, output, render=False, day_of_year=None, weather="clear"):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     scene.unit_settings.system = "METRIC"
@@ -574,6 +575,7 @@ def build(shore_seed, output, render=False, day_of_year=None):
         apply_growth(meshes.values(), day_of_year)
         apply_blender(bpy.data.materials, day_of_year)
         scene["day_of_year"] = day_of_year
+    apply_ground(terrain, weather, in_water)
     bpy.ops.export_scene.gltf(
         filepath=str(output / "birch-glade.glb"), export_format="GLB",
         export_tangents=True, export_extras=True, export_vertex_color="ACTIVE",
@@ -608,6 +610,8 @@ def build(shore_seed, output, render=False, day_of_year=None):
     sun.data.energy = 2.75
     sun.data.color = (1.0, 0.94, 0.85)
     scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.47
+    apply_atmosphere(scene, sun, weather, shore_seed)
+    scene["weather"] = weather
     scene.render.resolution_x = 1000
     scene.render.resolution_y = 680
     for screen in bpy.data.screens:
@@ -632,6 +636,7 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--day-of-year", type=float, help="Snapshot day on a 365-day calendar")
+    parser.add_argument("--weather", choices=PRESETS, default="clear")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     if args.day_of_year is not None and not isfinite(args.day_of_year):
         parser.error("--day-of-year must be finite")
@@ -639,5 +644,10 @@ if __name__ == "__main__":
     print(f"Shore seed: {seed}", flush=True)
     output = args.output_dir
     if output is None:
-        output = OUTPUT if args.day_of_year is None else OUTPUT / "variants" / f"day-{args.day_of_year:g}"
-    build(seed, output.resolve(), args.render, args.day_of_year)
+        output = OUTPUT
+        if args.day_of_year is not None or args.weather != "clear":
+            name = f"day-{args.day_of_year:g}" if args.day_of_year is not None else "summer"
+            if args.weather != "clear":
+                name += f"-{args.weather}"
+            output = OUTPUT / "variants" / name
+    build(seed, output.resolve(), args.render, args.day_of_year, args.weather)
