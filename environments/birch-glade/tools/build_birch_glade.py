@@ -1,7 +1,7 @@
 """Build a birch glade using the plant_life asset library."""
 import argparse
 from collections import Counter
-from math import cos, exp, sin, tau
+from math import cos, exp, isfinite, sin, tau
 from pathlib import Path
 from random import Random, SystemRandom
 import sys
@@ -18,6 +18,16 @@ import build_granite_woodland as woodland
 sys.path.insert(0, str(woodland.ROOT / "assets" / "terrain" / "hydroxus-terrain"))
 import hydroxus_rivers
 from hydroxus_water_join import join_water_channels
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from seasonal_materials import apply_blender
+from seasonal_growth import add_litter, apply_growth
+
+
+BANK_GRASSES = {
+    "Floating sweet-grass": "grasses/floating-sweet-grass/floating-sweet-grass.glb",
+    "Creeping bent": "grasses/creeping-bent/creeping-bent.glb",
+    "Tufted hairgrass": "grasses/tufted-hairgrass/tufted-hairgrass.glb",
+}
 
 
 def trail_x(y):
@@ -328,7 +338,7 @@ def add_outer_ground(group, material):
         group.objects.link(bpy.data.objects.new(name, mesh))
 
 
-def build(shore_seed, output, render=False):
+def build(shore_seed, output, render=False, day_of_year=None):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     scene.unit_settings.system = "METRIC"
@@ -341,6 +351,7 @@ def build(shore_seed, output, render=False):
 
     species_by_group = {
         "Canopy": ("Silver birch", "English oak", "Norway spruce", "European larch"),
+        "Bank grasses": tuple(BANK_GRASSES),
         "Granite": ("Granite boulder", "Granite slab", "Granite cobble"),
         "Understory": ("Hard fern", "Bracken", "Common heather", "Wood melick",
                        "Sheep fescue", "English bluebell", "Oxeye daisy"),
@@ -366,16 +377,21 @@ def build(shore_seed, output, render=False):
         hit, _, _, _ = terrain_surface.ray_cast((x, y, 25), (0, 0, -1))
         return hit.z if hit is not None else outer_elevation(x, y)
 
-    def in_water(x, y):
+    def water_depth(x, y, surfaces):
         ground_z = surface_z(x, y)
-        for surface in water_surfaces:
+        depth = 0.0
+        for surface in surfaces:
             hit, _, _, _ = surface.ray_cast((x, y, 25), (0, 0, -1))
-            if hit is not None and hit.z > ground_z:
-                return True
-        return False
+            if hit is not None:
+                depth = max(depth, hit.z - ground_z)
+        return depth
 
+    def in_water(x, y):
+        return water_depth(x, y, water_surfaces) > 0.0
+
+    models = {**woodland.MODELS, **BANK_GRASSES}
     meshes = {
-        species: woodland.load_mesh(woodland.MODELS[species])
+        species: woodland.load_mesh(models[species])
         for group in species_by_group.values() for species in group
     }
     for species, mesh in meshes.items():
@@ -521,6 +537,43 @@ def build(shore_seed, output, render=False):
         place("Granite boulder", "Granite", river_x(y) + 0.74, y, rng.uniform(0.65, 0.98),
               0.02, allow_water=True)
 
+    # Use the same bank sections as the water and gravel. Place plants in patches,
+    # checking the actual meshes after carving and joining the waterways.
+    bank_rng = Random(shore_seed ^ 0x29365)
+    species_zones = (
+        ("Floating sweet-grass", (-.30, -.025), (.72, 1.02), .55),
+        ("Creeping bent", (.12, .46), (.65, 1.25), .35),
+        ("Tufted hairgrass", (.43, 1.05), (.52, .94), .94),
+    )
+    for channel, sections in enumerate(shorelines):
+        for side, direction in enumerate((-1, 1)):
+            phase = bank_rng.uniform(0, tau)
+            for species, offsets, scales, spacing in species_zones:
+                next_distance = .8
+                for center, lateral, widths, distance in sections:
+                    if distance < next_distance or distance > sections[-1][3] - .85:
+                        continue
+                    next_distance = distance + spacing * bank_rng.uniform(.69, 1.43)
+                    if sin(1.4 * distance + phase) < -.48:
+                        continue
+                    outward = lateral * direction
+                    along = Vector((outward.y, -outward.x, 0))
+                    point = center + outward * (widths[side] + bank_rng.uniform(*offsets))
+                    point += along * bank_rng.uniform(-.13, .13)
+                    x, y = point.x, point.y
+                    if not clear(x, y):
+                        continue
+                    shallow = species == "Floating sweet-grass"
+                    if shallow and not .005 < water_depth(x, y, (water_surfaces[channel],)) < .12:
+                        continue
+                    place(species, "Bank grasses", x, y, bank_rng.uniform(*scales),
+                          allow_water=shallow)
+
+    if day_of_year is not None:
+        add_litter(scene, groups["Canopy"].objects, surface_z, in_water, day_of_year, shore_seed)
+        apply_growth(meshes.values(), day_of_year)
+        apply_blender(bpy.data.materials, day_of_year)
+        scene["day_of_year"] = day_of_year
     bpy.ops.export_scene.gltf(
         filepath=str(output / "birch-glade.glb"), export_format="GLB",
         export_tangents=True, export_extras=True, export_vertex_color="ACTIVE",
@@ -576,9 +629,15 @@ if __name__ == "__main__":
     seeds = parser.add_mutually_exclusive_group()
     seeds.add_argument("--shore-seed", type=int, default=2741)
     seeds.add_argument("--random-shore", action="store_true")
-    parser.add_argument("--output-dir", type=Path, default=OUTPUT)
+    parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--render", action="store_true")
+    parser.add_argument("--day-of-year", type=float, help="Snapshot day on a 365-day calendar")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
+    if args.day_of_year is not None and not isfinite(args.day_of_year):
+        parser.error("--day-of-year must be finite")
     seed = SystemRandom().randrange(2**32) if args.random_shore else args.shore_seed
     print(f"Shore seed: {seed}", flush=True)
-    build(seed, args.output_dir.resolve(), args.render)
+    output = args.output_dir
+    if output is None:
+        output = OUTPUT if args.day_of_year is None else OUTPUT / "variants" / f"day-{args.day_of_year:g}"
+    build(seed, output.resolve(), args.render, args.day_of_year)

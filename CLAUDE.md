@@ -4,6 +4,12 @@
 - Use [white willow](assets/deciduous/white-willow/README.md) as a scattered accent on sunny, open riverbanks or broad pond margins. Leave room for its roughly 12 m crown and drooping shoots. In Birch Glade, favor open stretches of Birch River where the canopy can overhang the bank without blocking a crossing.
 - Place each ground-level trunk pivot on the bank above the ordinary waterline. Keep trails and wading routes clear. Use seeded variants and rotate instances when placing several in view.
 
+# Grass placement along streams
+
+- Use [floating sweet-grass](assets/grasses/floating-sweet-grass/README.md) where the channel is only a few centimeters deep. Let its long blades trail toward the water and keep deeper runs and crossings open.
+- Use [creeping bent](assets/grasses/creeping-bent/README.md) to cover exposed mud immediately above the waterline in broken mats.
+- Use [tufted hairgrass](assets/grasses/tufted-hairgrass/README.md) for scattered taller tussocks on the damp upper edge. Birch Glade scatters these three from the channel bank sections and checks the terrain and water surfaces before placing them.
+
 # Fallen sticks on the woodland floor
 
 Use a mostly bare mix beneath established trees. Add a few sticks with curled

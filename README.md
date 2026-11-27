@@ -204,6 +204,14 @@ A fine-bladed tuft with dry seed heads. See the [models, texture maps, generator
 
 Three six-triangle clumps for scattering over bare soil. See the [grass-card GLBs and generator](assets/grasses/woodland-grass-cards/README.md).
 
+### Floating sweet-grass
+
+A wet-margin grass with broad ribbon blades that arc close to the water. See the [floating sweet-grass models and generator](assets/grasses/floating-sweet-grass/README.md).
+
+### Creeping bent
+
+A low, spreading grass for damp exposed banks. See the [creeping bent models and generator](assets/grasses/creeping-bent/README.md).
+
 ### Tufted hairgrass
 
 A taller clump grass with airy bronze panicles. See the [tufted hairgrass asset and generator](assets/grasses/tufted-hairgrass/README.md).

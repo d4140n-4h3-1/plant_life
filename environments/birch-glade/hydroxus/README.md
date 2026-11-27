@@ -227,3 +227,29 @@ of an opaque test pattern. The renderer patch was checked against the pinned
 revision.
 The GLB's flow UVs and junction geometry were checked from the binary export.
 Runtime rendering in Wilderness remains unverified.
+
+## Seasonal foliage colors
+
+The [seasonal palette](../../../assets/seasonal-foliage.json) maps exact GLB
+material names to dated linear RGB multipliers. Day 1 is January 1 on a
+365-day calendar. Wrap the day into `[1, 366)`, locate the surrounding keys
+(including the first key shifted one year forward), and interpolate with
+`t*t*(3-2*t)`. Multiply the original linear RGB in the shader and clamp to [0, 1], leaving
+alpha and texture bindings intact. Gains above one brighten autumn foliage.
+The snapshot builder bakes those gains into the base-color images for glTF. Unlisted materials keep their original color.
+Sample when the in-game date changes rather than once per plant per frame.
+
+Birch Glade's Blender builder can export a matching Blender and GLB snapshot:
+
+```sh
+blender --background --python-exit-code 1 \
+  --python environments/birch-glade/tools/build_birch_glade.py -- \
+  --day-of-year 300 --output-dir /tmp/birch-glade-autumn
+```
+
+The Blender snapshot also varies the color of neighboring crown sprays,
+thins deciduous foliage by species and date, hides flower geometry outside
+its bloom window, and scatters fallen broad leaves around trees. These
+geometry changes are baked into snapshots. Each deciduous spray reaches its
+peak gold or amber tint at least eight days before it drops. The deciduous
+crowns are bare by December 1. Spruce keeps its needles.
