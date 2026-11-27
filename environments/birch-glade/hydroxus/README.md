@@ -263,11 +263,18 @@ date can be previewed under different conditions.
 ```sh
 blender --background --python-exit-code 1 \
   --python environments/birch-glade/tools/build_birch_glade.py -- \
-  --weather snow --day-of-year 335 --render
+  --weather snow --day-of-year 335 --snow-hours 24 --render
 ```
 
-Rain darkens the loam's vertex colors. Snow adds a patchy ground layer that
-favors gentle slopes and skips the wet channel. Surface changes are included in
-the GLB. The Blender scene adds overcast lighting and two looping layers of
-precipitation. For live weather, a Hydroxus project can use these scenes as
-references for its own weather controller and moving particle volume.
+Rain darkens the loam's vertex colors. Snow collects on the forest floor and
+upward-facing branches. Early snowfall fills gentle areas first. After 24
+hours, the dry floor is covered. On inland ground, the settled snow reaches
+43–47 cm, deep enough to cover the woodland grass cards at their authored size.
+Snow tapers near the water and can form narrow shelves in the shallows while
+the deeper stream stays open.
+
+Use `--snow-hours` (0–24, default 12) to select the export stage. The GLB contains
+the snow geometry at that stage, with the existing crystalline normal and
+roughness maps. In Blender, scrub frames 1–145 to watch the buildup, at six
+frames per snowfall hour. The precipitation and accumulation animations are
+authored previews for the Blender scene.

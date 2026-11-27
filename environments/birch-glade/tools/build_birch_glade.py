@@ -21,7 +21,8 @@ from hydroxus_water_join import join_water_channels
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from seasonal_materials import apply_blender
 from seasonal_growth import add_litter, apply_growth
-from weather import PRESETS, apply_atmosphere, apply_ground
+from weather import (DEFAULT_SNOW_HOURS, FULL_SNOW_HOURS, PRESETS,
+                     animate_accumulation, apply_atmosphere, apply_ground)
 
 
 BANK_GRASSES = {
@@ -339,7 +340,8 @@ def add_outer_ground(group, material):
         group.objects.link(bpy.data.objects.new(name, mesh))
 
 
-def build(shore_seed, output, render=False, day_of_year=None, weather="clear"):
+def build(shore_seed, output, render=False, day_of_year=None, weather="clear",
+          snow_hours=DEFAULT_SNOW_HOURS):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     scene.unit_settings.system = "METRIC"
@@ -575,7 +577,8 @@ def build(shore_seed, output, render=False, day_of_year=None, weather="clear"):
         apply_growth(meshes.values(), day_of_year)
         apply_blender(bpy.data.materials, day_of_year)
         scene["day_of_year"] = day_of_year
-    apply_ground(terrain, weather, in_water)
+    snow = apply_ground(terrain, weather, lambda x, y: water_depth(x, y, water_surfaces),
+                        list(groups["Canopy"].objects), snow_hours)
     bpy.ops.export_scene.gltf(
         filepath=str(output / "birch-glade.glb"), export_format="GLB",
         export_tangents=True, export_extras=True, export_vertex_color="ACTIVE",
@@ -611,7 +614,10 @@ def build(shore_seed, output, render=False, day_of_year=None, weather="clear"):
     sun.data.color = (1.0, 0.94, 0.85)
     scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.47
     apply_atmosphere(scene, sun, weather, shore_seed)
+    animate_accumulation(scene, snow, snow_hours)
     scene["weather"] = weather
+    if snow is not None:
+        scene["snow_hours"] = snow_hours
     scene.render.resolution_x = 1000
     scene.render.resolution_y = 680
     for screen in bpy.data.screens:
@@ -637,9 +643,13 @@ if __name__ == "__main__":
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--day-of-year", type=float, help="Snapshot day on a 365-day calendar")
     parser.add_argument("--weather", choices=PRESETS, default="clear")
+    parser.add_argument("--snow-hours", type=float, default=DEFAULT_SNOW_HOURS,
+                        help="Hours of snowfall to export (0 to 24, default 12)")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     if args.day_of_year is not None and not isfinite(args.day_of_year):
         parser.error("--day-of-year must be finite")
+    if not 0 <= args.snow_hours <= FULL_SNOW_HOURS:
+        parser.error("--snow-hours must be between 0 and 24")
     seed = SystemRandom().randrange(2**32) if args.random_shore else args.shore_seed
     print(f"Shore seed: {seed}", flush=True)
     output = args.output_dir
@@ -649,5 +659,7 @@ if __name__ == "__main__":
             name = f"day-{args.day_of_year:g}" if args.day_of_year is not None else "summer"
             if args.weather != "clear":
                 name += f"-{args.weather}"
+            if args.weather == "snow":
+                name += f"-{args.snow_hours:g}h"
             output = OUTPUT / "variants" / name
-    build(seed, output.resolve(), args.render, args.day_of_year, args.weather)
+    build(seed, output.resolve(), args.render, args.day_of_year, args.weather, args.snow_hours)
