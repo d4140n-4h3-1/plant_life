@@ -25,7 +25,7 @@ python assets/tools/bake_plant_wind.py
 
 ### Directional wind rigs
 
-Every standalone plant has a companion `<plant>-rigged.glb` beside its baked GLB. The rigs start in the rest pose and expose two bend joints per limb. Tree trunks flex progressively more toward the crown, and branches inherit motion at their attachment height. Grass seed heads follow their stalks. The [rig files](assets/) can be posed in Blender or driven at runtime.
+Standalone plants with articulated stems or branches have a companion `<plant>-rigged.glb` beside their baked GLB. The six-triangle woodland grass cards use a whole-clump morph animation. The rigs start in the rest pose and expose two bend joints per limb. Tree trunks flex progressively more toward the crown, and branches inherit motion at their attachment height. Grass seed heads follow their stalks. The [rig files](assets/) can be posed in Blender or driven at runtime.
 
 The directional previews use the runtime rig and show wind blowing right, reversing left, and dropping to calm.
 
@@ -199,6 +199,10 @@ A dense hedgerow shrub with red haws. See the [common hawthorn asset and generat
 ### Sheep fescue
 
 A fine-bladed tuft with dry seed heads. See the [models, texture maps, generator, and scatter example](assets/grasses/sheep-fescue/README.md).
+
+### Woodland grass cards
+
+Three six-triangle clumps for scattering over bare soil. See the [grass-card GLBs and generator](assets/grasses/woodland-grass-cards/README.md).
 
 ### Tufted hairgrass
 

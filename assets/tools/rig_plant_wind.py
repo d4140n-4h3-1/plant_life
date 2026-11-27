@@ -50,6 +50,9 @@ def repair_degenerate_tangents(document, data, attrs):
 def rig(source, category):
     document, data = read_glb(source)
     mesh, = document["meshes"]
+    if mesh.get("extras", {}).get("windWholeMesh"):
+        print(f"{source}: uses a whole-mesh Wind clip")
+        return
     nodes = document["nodes"]
     original, = nodes
     if original.get("mesh") != 0 or original.keys() & {"matrix", "translation", "rotation", "scale", "skin"}:

@@ -167,9 +167,8 @@ def wind_weights(seconds, profile, seed):
     return weights
 
 
-def bake(path, category):
+def bake(path, category, *, whole_mesh=False):
     profile = PROFILES[category]
-    target_names = BASE_TARGETS + BRANCH_TARGETS
     document, data = read_glb(path)
     animations = document.get("animations", [])
     existing = next((animation for animation in animations if animation.get("name") == CLIP), None)
@@ -179,6 +178,8 @@ def bake(path, category):
     if node.get("mesh") != 0 or node.keys() & {"matrix", "translation", "rotation", "scale", "skin"}:
         raise ValueError(f"{path}: expected one untransformed mesh node")
     mesh = document["meshes"][0]
+    whole_mesh = whole_mesh or mesh.get("extras", {}).get("windWholeMesh", False)
+    target_names = BASE_TARGETS if whole_mesh else BASE_TARGETS + BRANCH_TARGETS
     primitives = mesh["primitives"]
     if existing:
         names = mesh.get("extras", {}).get("targetNames")
@@ -200,19 +201,24 @@ def bake(path, category):
         raise ValueError(f"{path}: expected a plant extending above its ground pivot")
 
     seed = int.from_bytes(hashlib.sha256(path.stem.encode()).digest()[:4], "little")
-    triangles = [triangle_indices(document, data, primitive) for primitive in primitives]
-    ribbon_uv = None
-    if category == "grasses" and len(primitives) == 1:
-        ribbon_uv = vectors(document, data, attributes[0]["TEXCOORD_0"], 2)
-    fields = branch_fields(positions, triangles, base, height,
-                           category in {"conifers", "deciduous"}, DIRECTION, ACROSS, seed,
-                           PERIOD, ribbon_uv=ribbon_uv)
+    fields = None
+    if not whole_mesh:
+        triangles = [triangle_indices(document, data, primitive) for primitive in primitives]
+        ribbon_uv = None
+        if category == "grasses" and len(primitives) == 1:
+            ribbon_uv = vectors(document, data, attributes[0]["TEXCOORD_0"], 2)
+        fields = branch_fields(positions, triangles, base, height,
+                               category in {"conifers", "deciduous"}, DIRECTION, ACROSS, seed,
+                               PERIOD, ribbon_uv=ribbon_uv)
 
-    for primitive, attr, position, assignment in zip(primitives, attributes, positions, fields[0]):
+    for index, (primitive, attr, position) in enumerate(zip(primitives, attributes, positions)):
         def deform(points):
+            offsets = displacement(points, base, height, profile)
+            if fields is None:
+                return offsets
             return np.concatenate((
-                displacement(points, base, height, profile),
-                local_displacement(points, assignment, fields, base, height),
+                offsets,
+                local_displacement(points, fields[0][index], fields, base, height),
             ))
 
         offsets = deform(position)
@@ -238,9 +244,12 @@ def bake(path, category):
         primitive["targets"] = targets
 
     mesh["weights"] = [0.0] * len(targets)
-    mesh.setdefault("extras", {})["targetNames"] = target_names
+    extras = mesh.setdefault("extras", {})
+    extras["targetNames"] = target_names
+    if whole_mesh:
+        extras["windWholeMesh"] = True
     seconds = np.linspace(0, PERIOD, round(PERIOD * 30) + 1)
-    keys = wind_weights(seconds, profile, seed)
+    keys = wind_weights(seconds, profile, seed)[:, :len(target_names)]
     document.setdefault("animations", []).append({
         "name": CLIP,
         "samplers": [{
